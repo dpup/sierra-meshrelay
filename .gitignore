@@ -1,0 +1,5 @@
+.envrc
+.env
+/bin/
+/dist/
+*.local.toml

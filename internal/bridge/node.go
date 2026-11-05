@@ -1,0 +1,219 @@
+package bridge
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net"
+	"sync/atomic"
+	"time"
+
+	"github.com/dpup/sierra-meshbridge/internal/companion"
+	"github.com/dpup/sierra-meshbridge/internal/nodelink"
+	"github.com/dpup/sierra-meshbridge/internal/protocol"
+)
+
+// runNode keeps a verified link to the node open for as long as ctx lives.
+func (b *Bridge) runNode(ctx context.Context) {
+	delay := b.opts.NodeRetryMin
+	backoff := func() {
+		b.waitOrRelink(ctx, delay)
+		delay = min(delay*2, b.opts.NodeRetryMax)
+	}
+	for ctx.Err() == nil {
+		link, err := b.opts.Opener.Open(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			b.nodeDown(nodeErrorText(err), err)
+			if errors.Is(err, nodelink.ErrNotConfigured) {
+				b.waitOrRelink(ctx, b.opts.NodeRetryMax)
+				continue
+			}
+			backoff()
+			continue
+		}
+		if b.nodeOpens.Add(1) > 1 {
+			b.log.Debug("node link reopened", "link", link.Detail())
+		}
+		res := b.serveLink(ctx, link)
+		switch res {
+		case linkMismatch:
+			b.waitOrRelink(ctx, b.opts.MismatchRetry)
+		case linkFailedIdentify:
+			backoff()
+		case linkServed:
+			// It was up and verified, so reopen promptly.
+			delay = b.opts.NodeRetryMin
+			b.waitOrRelink(ctx, delay)
+		case linkRelinked:
+			delay = b.opts.NodeRetryMin
+		}
+	}
+}
+
+type linkResult int
+
+const (
+	linkFailedIdentify linkResult = iota
+	linkMismatch
+	linkServed
+	linkRelinked
+)
+
+// serveLink identity-checks link, then forwards frames until it fails.
+func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
+	linkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	frames := make(chan []byte, b.opts.OutQueue)
+	readErr := make(chan error, 1)
+	go func() {
+		defer close(frames)
+		for {
+			f, err := link.ReadFrame()
+			if err != nil {
+				readErr <- err
+				return
+			}
+			select {
+			case frames <- f:
+			case <-linkCtx.Done():
+				readErr <- linkCtx.Err()
+				return
+			}
+		}
+	}()
+
+	var relinked atomic.Bool
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		select {
+		case <-linkCtx.Done():
+		case <-b.relink:
+			relinked.Store(true)
+			b.log.Info("relink requested; reopening the node link")
+		}
+		link.Close()
+	}()
+	defer func() { cancel(); <-closed }()
+
+	id, err := companion.Identify(linkCtx, frames, link.WriteFrame, b.opts.IdentifyTimeout)
+	if err != nil {
+		cancel()
+		<-closed
+		if relinked.Load() {
+			return linkRelinked
+		}
+		if ctx.Err() != nil {
+			return linkFailedIdentify // shutting down
+		}
+		b.nodeDown("identity check failed", err)
+		return linkFailedIdentify
+	}
+	node := protocol.Node{State: protocol.NodeConnected, Pubkey: id.Pubkey, Name: id.Name, FW: id.FW, Model: id.Model}
+	if want := b.opts.Config.Node.ExpectedPubkey; want != "" && id.Pubkey != want {
+		node.State = protocol.NodeMismatch
+		if prev, _, _, _ := b.nodeSnapshot(); prev != node {
+			b.log.Warn("this isn't the node SIERRA expects; contact your SIERRA contact",
+				"pubkey", id.Pubkey, "expected", want, "name", id.Name)
+		}
+		b.setNode(node, nil)
+		return linkMismatch
+	}
+	b.log.Info("node connected", "link", link.Kind(), "detail", link.Detail(),
+		"name", id.Name, "pubkey", id.Pubkey, "fw", id.FW, "model", id.Model)
+	b.setNode(node, link)
+
+	for f := range frames {
+		b.fromNode(f)
+	}
+	err = <-readErr
+	if ctx.Err() != nil {
+		return linkServed // shutting down
+	}
+	if relinked.Load() {
+		b.setNode(protocol.Node{State: protocol.NodeDisconnected, Error: "relink"}, nil)
+		return linkRelinked
+	}
+	b.nodeDown(nodeErrorText(err), err)
+	return linkServed
+}
+
+func (b *Bridge) nodeDown(reason string, err error) {
+	n := protocol.Node{State: protocol.NodeDisconnected, Error: reason}
+	prev, _, _, _ := b.nodeSnapshot()
+	if prev.State != n.State || prev.Error != n.Error {
+		lvl := slog.LevelWarn
+		if prev.State == protocol.NodeDisconnected {
+			lvl = slog.LevelInfo
+		}
+		b.log.Log(context.Background(), lvl, "node unavailable", "reason", reason, "error", err)
+	}
+	b.setNode(n, nil)
+}
+
+// nodeErrorText turns a link error into a short reason for node_status.
+func nodeErrorText(err error) string {
+	var ne net.Error
+	switch {
+	case errors.Is(err, nodelink.ErrNotConfigured):
+		return "no node address configured"
+	case errors.Is(err, companion.ErrFrameTooLarge):
+		return "node link out of sync"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, net.ErrClosed):
+		return "node link closed"
+	case errors.As(err, &ne) && ne.Timeout():
+		return "node not responding"
+	case err != nil:
+		return "can't reach node"
+	}
+	return ""
+}
+
+// waitOrRelink waits d, ctx's end, or a relink request (which skips the wait).
+func (b *Bridge) waitOrRelink(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	case <-b.relink:
+	}
+}
+
+// fromNode forwards a frame read from the node to the relay, if a client is
+// attached. When one is, it blocks until the relay takes the frame: a slow
+// relay slows node reads rather than dropping frames.
+func (b *Bridge) fromNode(f []byte) {
+	b.framesFromNode.Add(1)
+	s := b.currentSession()
+	if s == nil || !s.isAttached() {
+		b.droppedFromNode.Add(1)
+		return
+	}
+	select {
+	case s.out <- f:
+	case <-s.done:
+		b.droppedFromNode.Add(1)
+	}
+}
+
+// toNode writes a frame from the relay to the node.
+func (b *Bridge) toNode(f []byte) {
+	link := b.currentLink()
+	if link == nil {
+		b.droppedToNode.Add(1)
+		return
+	}
+	if err := link.WriteFrame(f); err != nil {
+		b.droppedToNode.Add(1)
+		b.log.Warn("writing to node failed; reopening the link", "error", err)
+		link.Close()
+		return
+	}
+	b.framesToNode.Add(1)
+}

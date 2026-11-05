@@ -1,0 +1,16 @@
+# meshbridge config. On Windows and Mac, pairing writes this file; hosts never
+# edit it. For development, keep the token out of the file and set
+# MESHBRIDGE_TOKEN instead.
+
+gateway = "bridge-dev"
+relay   = "wss://data.sierragridteam.org/mesh/relay"
+# token = "smb_…"
+
+[node]
+link = "tcp"                 # auto | serial | tcp (serial arrives in M2)
+expected_pubkey = ""         # 64 hex chars; empty = report whatever node answers
+tcp_host = "192.168.1.50"    # required until LAN scanning lands
+tcp_port = 5000
+
+[log]
+level = "info"               # debug | info | warn | error

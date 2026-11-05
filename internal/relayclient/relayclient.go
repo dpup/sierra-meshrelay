@@ -1,0 +1,147 @@
+// Package relayclient is a client of the relay's client endpoint
+// (sierra-mesh-client.v1): take a lease on a gateway and exchange companion
+// frame payloads with its node. It backs the live tests now and
+// `meshbridge connect` later.
+package relayclient
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"sync"
+
+	"github.com/coder/websocket"
+
+	"github.com/dpup/sierra-meshbridge/internal/protocol"
+)
+
+// RefusedError means the relay didn't grant a lease.
+type RefusedError struct {
+	Code      string // relay error code, e.g. busy, gateway_offline, node_paused
+	CloseCode int
+	Status    *protocol.GatewayStatus
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("relay refused the lease: %s (close %d)", e.Code, e.CloseCode)
+}
+
+// Conn is a client session holding a lease.
+type Conn struct {
+	ws    *websocket.Conn
+	Lease protocol.Lease
+
+	// Frames delivers payloads from the node. Control delivers control
+	// messages (lease, lease_ending, gateway_status, error) as raw JSON.
+	// Both close when the session ends; Err then reports why.
+	Frames  chan []byte
+	Control chan json.RawMessage
+
+	mu  sync.Mutex
+	err error
+}
+
+// Dial connects to gateway on the relay at base (wss://…/mesh/relay) and
+// waits for a lease.
+func Dial(ctx context.Context, base, gateway, token string, preempt bool) (*Conn, error) {
+	u := strings.TrimRight(base, "/") + "/" + gateway
+	if preempt {
+		u += "?preempt=1"
+	}
+	ws, resp, err := websocket.Dial(ctx, u, &websocket.DialOptions{
+		HTTPHeader:   http.Header{"Authorization": {"Bearer " + token}},
+		Subprotocols: []string{protocol.ClientSubprotocol},
+	})
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	if err != nil {
+		if resp != nil {
+			return nil, fmt.Errorf("dial: HTTP %d: %w", resp.StatusCode, err)
+		}
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+	ws.SetReadLimit(protocol.MaxControlBytes + 1024)
+
+	refused := &RefusedError{CloseCode: -1}
+	for {
+		typ, data, err := ws.Read(ctx)
+		if err != nil {
+			ws.CloseNow()
+			if refused.Code != "" || refused.Status != nil {
+				refused.CloseCode = int(websocket.CloseStatus(err))
+				return nil, refused
+			}
+			return nil, fmt.Errorf("waiting for lease: %w", err)
+		}
+		if typ != websocket.MessageText {
+			continue
+		}
+		switch protocol.TypeOf(data) {
+		case protocol.TypeLease:
+			c := &Conn{ws: ws, Frames: make(chan []byte, 256), Control: make(chan json.RawMessage, 64)}
+			if err := json.Unmarshal(data, &c.Lease); err != nil {
+				ws.CloseNow()
+				return nil, fmt.Errorf("bad lease message: %w", err)
+			}
+			go c.readLoop()
+			return c, nil
+		case protocol.TypeError:
+			var m protocol.Error
+			_ = json.Unmarshal(data, &m)
+			refused.Code = m.Code
+		case protocol.TypeGatewayStatus:
+			var m protocol.GatewayStatus
+			_ = json.Unmarshal(data, &m)
+			refused.Status = &m
+		}
+	}
+}
+
+func (c *Conn) readLoop() {
+	defer close(c.Frames)
+	defer close(c.Control)
+	for {
+		typ, data, err := c.ws.Read(context.Background())
+		if err != nil {
+			c.mu.Lock()
+			c.err = err
+			c.mu.Unlock()
+			return
+		}
+		if typ == websocket.MessageBinary {
+			c.Frames <- data
+		} else {
+			c.Control <- json.RawMessage(data)
+		}
+	}
+}
+
+// Err reports why the session ended, once Frames and Control have closed.
+func (c *Conn) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+// SendFrame sends one companion payload to the node.
+func (c *Conn) SendFrame(ctx context.Context, payload []byte) error {
+	if len(payload) > protocol.MaxFrameBytes {
+		return fmt.Errorf("frame of %d bytes exceeds %d", len(payload), protocol.MaxFrameBytes)
+	}
+	return c.ws.Write(ctx, websocket.MessageBinary, payload)
+}
+
+// Renew asks to extend the lease. The relay answers with a new lease message
+// (or an error) on Control.
+func (c *Conn) Renew(ctx context.Context) error {
+	b, _ := json.Marshal(protocol.Renew{Type: protocol.TypeRenew, Lease: c.Lease.Lease})
+	return c.ws.Write(ctx, websocket.MessageText, b)
+}
+
+// Close ends the session, releasing the lease.
+func (c *Conn) Close() error {
+	return c.ws.Close(websocket.StatusNormalClosure, "")
+}

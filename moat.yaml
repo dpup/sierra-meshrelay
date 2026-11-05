@@ -1,5 +1,5 @@
 name: meshbridge
-agents: [codex, claud]
+agents: [codex, claude]
 runtime: docker
 grants:
   - github
