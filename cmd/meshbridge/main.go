@@ -13,8 +13,10 @@ import (
 	"runtime"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/dpup/sierra-meshbridge/internal/bridge"
+	"github.com/dpup/sierra-meshbridge/internal/companion"
 	"github.com/dpup/sierra-meshbridge/internal/config"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
 	"github.com/dpup/sierra-meshbridge/internal/protocol"
@@ -27,6 +29,7 @@ const usage = `meshbridge connects a MeshCore companion node to the SIERRA Mesh 
 
 Usage:
   meshbridge run [-config path]   Run the bridge in the foreground
+  meshbridge find-node -host addr Connect to a TCP node and print its identity
   meshbridge version              Print version and build info
 `
 
@@ -39,6 +42,8 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		err = cmdRun(os.Args[2:])
+	case "find-node":
+		err = cmdFindNode(os.Args[2:])
 	case "version", "-version", "--version":
 		cmdVersion()
 	case "help", "-h", "-help", "--help":
@@ -108,4 +113,41 @@ func cmdVersion() {
 			}
 		}
 	}
+}
+
+// cmdFindNode runs the identity check against a TCP node. Serial detection
+// and LAN scanning come later.
+func cmdFindNode(args []string) error {
+	fs := flag.NewFlagSet("find-node", flag.ExitOnError)
+	host := fs.String("host", "", "node address")
+	port := fs.Int("port", 5000, "node TCP port")
+	_ = fs.Parse(args)
+	if *host == "" {
+		return errors.New("-host is required for now")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	link, err := nodelink.TCP{Host: *host, Port: *port}.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer link.Close()
+	frames := make(chan []byte, 64)
+	go func() {
+		defer close(frames)
+		for {
+			f, err := link.ReadFrame()
+			if err != nil {
+				return
+			}
+			frames <- f
+		}
+	}()
+	id, err := companion.Identify(ctx, frames, link.WriteFrame, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("identity check against %s: %w", link.Detail(), err)
+	}
+	fmt.Printf("Found: %s\n  link    %s %s\n  pubkey  %s\n  model   %s\n  fw      %s\n",
+		id.Name, link.Kind(), link.Detail(), id.Pubkey, id.Model, id.FW)
+	return nil
 }

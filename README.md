@@ -22,6 +22,8 @@ cp examples/meshbridge.toml meshbridge.local.toml   # set gateway and node.tcp_h
 MESHBRIDGE_TOKEN=smb_… ./bin/meshbridge run -config meshbridge.local.toml
 ```
 
+`./bin/meshbridge find-node -host 192.168.4.50` runs the identity check against a TCP node and prints its name, pubkey, model and firmware. Use that pubkey as `node.expected_pubkey`.
+
 Without a radio, run `./bin/fakenode -listen 127.0.0.1:5000` and point `tcp_host` at it. The fake node answers `APP_START` and `DEVICE_QUERY`, and echoes every other frame back with a `0x80` prefix.
 
 ## Testing
