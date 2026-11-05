@@ -204,6 +204,8 @@ func Describe(st bridge.Status, gateway, version string) StatusDoc {
 		d.Level, d.Reason = Red, "This bridge needs updating to talk to SIERRA."
 	case !st.RelayConnected:
 		d.Level, d.Reason = Red, "Can't reach SIERRA. Check this computer's internet connection."
+	case st.Node.State != meshproto.NodeConnected && st.Node.Error == bridge.NodeErrResuming:
+		d.Level, d.Reason = Amber, "Resuming sharing…"
 	case st.Node.State != meshproto.NodeConnected:
 		d.Level, d.Reason = Amber, "Connected to SIERRA, but your node isn't connected."
 	default:

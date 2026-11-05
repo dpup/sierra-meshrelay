@@ -51,6 +51,11 @@ func TestDescribe(t *testing.T) {
 		{bridge.Status{RelayConnected: false, RelayClass: bridge.ClassAuth, Node: connected}, control.Red},
 		{bridge.Status{RelayConnected: true, Node: meshproto.Node{State: meshproto.NodeMismatch}}, control.Red},
 	}
+	resuming := control.Describe(bridge.Status{RelayConnected: true,
+		Node: meshproto.Node{State: meshproto.NodeDisconnected, Error: bridge.NodeErrResuming}}, "gw", "v")
+	if resuming.Level != control.Amber || resuming.Reason != "Resuming sharing…" {
+		t.Errorf("just resumed: %s %q", resuming.Level, resuming.Reason)
+	}
 	for _, c := range cases {
 		d := control.Describe(c.st, "gw", "v")
 		if d.Level != c.level || d.Reason == "" {

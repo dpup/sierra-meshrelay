@@ -26,6 +26,10 @@ type pauseState struct {
 	changed chan struct{} // closed and replaced on every change
 }
 
+// NodeErrResuming is the node error while sharing has just resumed and the
+// node link is being reopened.
+const NodeErrResuming = "resuming"
+
 // savedState is the bridge's small state file.
 type savedState struct {
 	PausedUntilResumed bool `json:"paused_until_resumed,omitempty"`
@@ -60,7 +64,7 @@ func (b *Bridge) Resume() {
 		// paused node while sharing is on, and the loop's own "connected"
 		// can't be overwritten by a late update here.
 		if b.node.State == meshproto.NodePaused {
-			b.setNodeLocked(meshproto.Node{State: meshproto.NodeDisconnected, Error: "resuming"})
+			b.setNodeLocked(meshproto.Node{State: meshproto.NodeDisconnected, Error: NodeErrResuming})
 		}
 		b.pauseChangedLocked()
 	}
