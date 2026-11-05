@@ -40,6 +40,10 @@ type Options struct {
 	HelloTimeout    time.Duration // wait for welcome (default 10s)
 	OutQueue        int           // node→relay frame buffer (default 64)
 	Backoff         *Backoff      // relay reconnect policy (default DefaultBackoff)
+
+	// StatePath is where a pause "until resumed" is saved so it survives a
+	// restart. Empty disables saving.
+	StatePath string
 }
 
 func (o *Options) defaults() {
@@ -87,6 +91,10 @@ type Bridge struct {
 	session     *session      // established relay session; nil otherwise
 
 	relink chan struct{}
+	pause  pauseState // guarded by mu
+
+	relayClass  Class        // how the last relay session ended (guarded by mu)
+	lastTraffic atomic.Int64 // unix nanos of the last frame forwarded either way
 
 	nodeOpens       atomic.Int64
 	relayWelcomes   atomic.Int64
@@ -99,7 +107,7 @@ type Bridge struct {
 // New creates a Bridge.
 func New(opts Options) *Bridge {
 	opts.defaults()
-	return &Bridge{
+	b := &Bridge{
 		opts:        opts,
 		log:         opts.Log,
 		node:        meshproto.Node{State: meshproto.NodeDisconnected},
@@ -107,7 +115,11 @@ func New(opts Options) *Bridge {
 		linkDetail:  opts.LinkDetail,
 		nodeChanged: make(chan struct{}),
 		relink:      make(chan struct{}, 1),
+		pause:       pauseState{changed: make(chan struct{})},
+		relayClass:  ClassRetry,
 	}
+	b.loadState()
+	return b
 }
 
 // Run runs both links until ctx ends.
@@ -140,6 +152,15 @@ type Status struct {
 	FramesFromNode  int64
 	DroppedFromNode int64
 	DroppedToNode   int64
+
+	Paused     bool
+	PauseUntil time.Time // zero while paused: until resumed
+	// LastTraffic is when a frame last passed between a client and the node
+	// (zero: never).
+	LastTraffic time.Time
+	// RelayClass is how the last relay session ended; ClassAuth means the
+	// relay rejected this bridge's credentials.
+	RelayClass Class
 }
 
 // Status returns the current state.
@@ -153,6 +174,12 @@ func (b *Bridge) Status() Status {
 		FramesFromNode:  b.framesFromNode.Load(),
 		DroppedFromNode: b.droppedFromNode.Load(),
 		DroppedToNode:   b.droppedToNode.Load(),
+		Paused:          b.pause.paused,
+		PauseUntil:      b.pause.until,
+		RelayClass:      b.relayClass,
+	}
+	if t := b.lastTraffic.Load(); t != 0 {
+		st.LastTraffic = time.Unix(0, t)
 	}
 	if b.session != nil {
 		st.Attached = b.session.isAttached()
@@ -168,6 +195,10 @@ func (b *Bridge) setNode(n meshproto.Node, link nodelink.Link) {
 	if link != nil {
 		b.linkKind, b.linkDetail = link.Kind(), link.Detail()
 	}
+	b.setNodeLocked(n)
+}
+
+func (b *Bridge) setNodeLocked(n meshproto.Node) {
 	if n == b.node {
 		return
 	}
@@ -195,12 +226,6 @@ func (b *Bridge) currentSession() *session {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.session
-}
-
-func (b *Bridge) setSession(s *session) {
-	b.mu.Lock()
-	b.session = s
-	b.mu.Unlock()
 }
 
 func (b *Bridge) clearSession(s *session) {

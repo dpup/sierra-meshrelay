@@ -9,6 +9,8 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.28.0
+	golang.org/x/crypto v0.53.0
+	golang.org/x/term v0.44.0
 	google.golang.org/grpc v1.81.1
 	modernc.org/sqlite v1.53.0
 )

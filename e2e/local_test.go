@@ -41,7 +41,7 @@ type localRelay struct {
 	server *prefab.Server
 }
 
-func startRelay(t *testing.T) *localRelay {
+func startRelay(t *testing.T, tune ...func(*relay.Config)) *localRelay {
 	t.Helper()
 	ctx := logging.With(context.Background(), logging.NewDevLogger())
 	st, err := relay.OpenStore(ctx, filepath.Join(t.TempDir(), "relay.db"), time.Second)
@@ -49,16 +49,22 @@ func startRelay(t *testing.T) *localRelay {
 		t.Fatal(err)
 	}
 	admin, _ := relay.MintToken(relay.ClientTokenPrefix)
-	r := relay.New(ctx, relay.Config{
-		BootstrapAdmins: map[string]string{"root": relay.TokenHash(admin)},
-		TickInterval:    20 * time.Millisecond,
-	}, st)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
+	cfg := relay.Config{
+		BootstrapAdmins: map[string]string{"root": relay.TokenHash(admin)},
+		TickInterval:    20 * time.Millisecond,
+		PublicBaseURL:   fmt.Sprintf("http://127.0.0.1:%d", port),
+		Pairing:         relay.PairingConfig{BcryptCost: 4, PollInterval: time.Second},
+	}
+	for _, f := range tune {
+		f(&cfg)
+	}
+	r := relay.New(ctx, cfg, st)
 	server := prefab.New(prefab.WithContext(ctx), prefab.WithHost("127.0.0.1"), prefab.WithPort(port), prefab.WithPlugin(r))
 	go func() { _ = server.Start() }()
 	lr := &localRelay{t: t, base: fmt.Sprintf("http://127.0.0.1:%d", port), admin: admin, server: server}
@@ -376,3 +382,5 @@ func TestLocalBridgeDropEndsLease(t *testing.T) {
 	}
 	c2.Close()
 }
+
+func jsonDecode(resp *http.Response, v any) error { return json.NewDecoder(resp.Body).Decode(v) }

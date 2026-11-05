@@ -137,3 +137,55 @@ func TestTypeOf(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizePassphrase(t *testing.T) {
+	for in, want := range map[string]string{
+		"maple-river-quartz-otter":      "maple-river-quartz-otter",
+		"Maple River quartz  otter":     "maple-river-quartz-otter",
+		" maple, river,,quartz--otter ": "maple-river-quartz-otter",
+		"":                              "",
+	} {
+		if got := NormalizePassphrase(in); got != want {
+			t.Errorf("NormalizePassphrase(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSpecPairingExamples decodes the spec's pairing request and response
+// examples into their Go types, rejecting unknown fields.
+func TestSpecPairingExamples(t *testing.T) {
+	spec, err := os.ReadFile("../PROTOCOL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, m := range jsonBlock.FindAllSubmatch(spec, -1) {
+		raw := bytes.TrimSpace(m[1])
+		var probe map[string]any
+		if json.Unmarshal(raw, &probe) != nil {
+			continue
+		}
+		var v any
+		switch {
+		case probe["host_label"] != nil:
+			v = &PairStartRequest{}
+		case probe["pair_id"] != nil && probe["user_code"] != nil:
+			v = &PairStartResponse{}
+		case probe["status"] == PairApproved:
+			v = &PairResult{}
+		default:
+			continue
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(v); err != nil {
+			t.Errorf("%T: %v\n%s", v, err, raw)
+		}
+		found[reflect.TypeOf(v).Elem().Name()] = true
+	}
+	for _, name := range []string{"PairStartRequest", "PairStartResponse", "PairResult"} {
+		if !found[name] {
+			t.Errorf("no spec example decoded as %s", name)
+		}
+	}
+}

@@ -64,6 +64,17 @@ func (r *Relay) ServerOptions() []prefab.ServerOption {
 		prefab.WithJSONHandler("POST "+api+"/clients", j(r.admin(r.apiCreateClient))),
 		prefab.WithJSONHandler("DELETE "+api+"/clients/{name}", j(r.admin(r.apiDeleteClient))),
 		prefab.WithJSONHandler("GET "+api+"/leases", j(r.viewer(r.apiLeases))),
+
+		// Pairing. The two bridge endpoints have no auth (a bridge being
+		// paired has no token yet) and are rate-limited instead; see pairing.go.
+		prefab.WithHTTPHandlerFunc("POST "+api+"/pair/start", h(r.handlePairStart)),
+		prefab.WithHTTPHandlerFunc("POST "+api+"/pair/poll", h(r.handlePairPoll)),
+		prefab.WithJSONHandler("GET "+api+"/pairings", j(r.admin(r.apiListPairings))),
+		prefab.WithJSONHandler("POST "+api+"/pairings/{code}/approve", j(r.admin(r.apiApprovePairing))),
+		prefab.WithJSONHandler("POST "+api+"/pairings/{code}/deny", j(r.admin(r.apiDenyPairing))),
+		prefab.WithJSONHandler("GET "+api+"/invites", j(r.admin(r.apiListInvites))),
+		prefab.WithJSONHandler("POST "+api+"/invites", j(r.admin(r.apiCreateInvite))),
+		prefab.WithJSONHandler("DELETE "+api+"/invites/{id}", j(r.admin(r.apiRevokeInvite))),
 		prefab.WithJSONHandler("GET "+api+"/metrics", j(r.viewer(r.apiMetrics))),
 	}
 }
@@ -257,7 +268,8 @@ type PublicGateway struct {
 	// Online: a bridge session is attached.
 	Online bool `json:"online"`
 	// NodeState is the node behind the bridge: connected | disconnected |
-	// mismatch. A pubkey the relay has not verified reads as mismatch. Absent
+	// mismatch | paused (the host paused sharing on purpose). A pubkey the
+	// relay has not verified reads as mismatch. Absent
 	// while the bridge is offline (the relay cannot know).
 	NodeState string `json:"node_state,omitempty"`
 	// Ready: a lease could be granted on this gateway's node.

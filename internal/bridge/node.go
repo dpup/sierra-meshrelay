@@ -22,6 +22,10 @@ func (b *Bridge) runNode(ctx context.Context) {
 		delay = min(delay*2, b.opts.NodeRetryMax)
 	}
 	for ctx.Err() == nil {
+		b.waitWhilePaused(ctx)
+		if ctx.Err() != nil {
+			return
+		}
 		link, err := b.opts.Opener.Open(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -48,7 +52,7 @@ func (b *Bridge) runNode(ctx context.Context) {
 			// It was up and verified, so reopen promptly.
 			delay = b.opts.NodeRetryMin
 			b.waitOrRelink(ctx, delay)
-		case linkRelinked:
+		case linkRelinked, linkPaused:
 			delay = b.opts.NodeRetryMin
 		}
 	}
@@ -61,6 +65,7 @@ const (
 	linkMismatch
 	linkServed
 	linkRelinked
+	linkPaused
 )
 
 // serveLink identity-checks link, then forwards frames until it fails.
@@ -87,17 +92,28 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 		}
 	}()
 
-	var relinked atomic.Bool
+	var relinked, paused atomic.Bool
 	closed := make(chan struct{})
 	go func() {
 		defer close(closed)
-		select {
-		case <-linkCtx.Done():
-		case <-b.relink:
-			relinked.Store(true)
-			b.log.Info("relink requested; reopening the node link")
+		defer link.Close()
+		for {
+			p, _, pauseCh := b.pauseSnapshot()
+			if p {
+				paused.Store(true)
+				b.log.Info("pausing: releasing the node link")
+				return
+			}
+			select {
+			case <-linkCtx.Done():
+				return
+			case <-b.relink:
+				relinked.Store(true)
+				b.log.Info("relink requested; reopening the node link")
+				return
+			case <-pauseCh:
+			}
 		}
-		link.Close()
 	}()
 	defer func() { cancel(); <-closed }()
 
@@ -107,6 +123,9 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 		<-closed
 		if relinked.Load() {
 			return linkRelinked
+		}
+		if paused.Load() {
+			return linkPaused
 		}
 		if ctx.Err() != nil {
 			return linkFailedIdentify // shutting down
@@ -134,6 +153,9 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 	err = <-readErr
 	if ctx.Err() != nil {
 		return linkServed // shutting down
+	}
+	if paused.Load() {
+		return linkPaused // waitWhilePaused reports the paused state
 	}
 	if relinked.Load() {
 		b.setNode(meshproto.Node{State: meshproto.NodeDisconnected, Error: "relink"}, nil)
@@ -197,6 +219,7 @@ func (b *Bridge) fromNode(f []byte) {
 	}
 	select {
 	case s.out <- f:
+		b.lastTraffic.Store(time.Now().UnixNano())
 	case <-s.done:
 		b.droppedFromNode.Add(1)
 	}
@@ -216,4 +239,5 @@ func (b *Bridge) toNode(f []byte) {
 		return
 	}
 	b.framesToNode.Add(1)
+	b.lastTraffic.Store(time.Now().UnixNano())
 }

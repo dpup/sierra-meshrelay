@@ -43,6 +43,9 @@ func (b *Bridge) runRelay(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		b.mu.Lock()
+		b.relayClass = Classify(res)
+		b.mu.Unlock()
 		wait := b.opts.Backoff.Next(res)
 		attrs := []any{"wait", wait.Round(time.Millisecond), "uptime", res.Uptime.Round(time.Second)}
 		if res.HTTPStatus != 0 {
@@ -142,7 +145,9 @@ func (b *Bridge) relaySession(ctx context.Context) (res SessionResult) {
 	defer cancelIO()
 	s := &session{conn: conn, ioCtx: ioCtx, out: make(chan []byte, b.opts.OutQueue), done: make(chan struct{}), leases: map[string]string{}}
 	sctx, cancel := context.WithCancelCause(ctx)
-	b.setSession(s)
+	b.mu.Lock()
+	b.session, b.relayClass = s, ClassRetry
+	b.mu.Unlock()
 	defer func() {
 		b.clearSession(s)
 		close(s.done)

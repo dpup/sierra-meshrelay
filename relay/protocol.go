@@ -43,6 +43,7 @@ const (
 	NodeConnected    = meshproto.NodeConnected
 	NodeDisconnected = meshproto.NodeDisconnected
 	NodeMismatch     = meshproto.NodeMismatch
+	NodePaused       = meshproto.NodePaused
 )
 
 // lease_ending reasons. Receivers must treat an unknown reason as the lease
@@ -55,6 +56,7 @@ const (
 	ReasonRevoked        = meshproto.ReasonRevoked
 	ReasonPubkeyMismatch = meshproto.ReasonPubkeyMismatch
 	ReasonShutdown       = meshproto.ReasonRelayShutdown
+	ReasonHostPaused     = meshproto.ReasonHostPaused
 	// reasonClientClosed is audit-only: the holder hung up, nobody is told.
 	reasonClientClosed = "client_closed"
 )

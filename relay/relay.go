@@ -55,6 +55,12 @@ type Config struct {
 	// handler to return after closing them (5s). A handoff counts sessions
 	// still open past it as a failed release.
 	SessionDrainTimeout time.Duration
+	// PublicBaseURL is the relay's public origin (https://data.sierragridteam.org),
+	// used to build the pairing verification URL and the relay URL handed to a
+	// newly paired bridge.
+	PublicBaseURL string
+	// Pairing tunes bridge pairing; zero values take defaults.
+	Pairing PairingConfig
 	// Gate admits requests to every relay route. A deploy handoff closes it
 	// to stop admitting new work (sierra-data passes its handoff gate). Nil
 	// means always open.
@@ -86,6 +92,10 @@ func (c Config) withDefaults() Config {
 	if c.AuthFailLimit == 0 {
 		c.AuthFailLimit = 10
 	}
+	if c.PublicBaseURL == "" {
+		c.PublicBaseURL = "https://data.sierragridteam.org"
+	}
+	c.Pairing = c.Pairing.withDefaults()
 	return c
 }
 
@@ -121,6 +131,7 @@ type Relay struct {
 	gate Gate
 
 	lockout *ipLockout
+	pairs   *pairingState
 	debug   map[string]bool
 	m       metrics
 
@@ -272,6 +283,7 @@ func New(ctx context.Context, cfg Config, st *Store) *Relay {
 		gws:     map[string]*gwState{},
 		auditCh: make(chan func(*Store) error, 1024),
 		lockout: newIPLockout(cfg.AuthFailLimit, cfg.AuthFailWindow, cfg.AuthLockout),
+		pairs:   newPairingState(cfg.Pairing),
 		debug:   map[string]bool{},
 		gate:    cfg.Gate,
 	}

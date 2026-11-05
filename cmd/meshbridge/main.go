@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -18,9 +19,9 @@ import (
 	"time"
 
 	"github.com/dpup/sierra-meshrelay/internal/bridge"
-	"github.com/dpup/sierra-meshrelay/internal/companion"
 	"github.com/dpup/sierra-meshrelay/internal/config"
 	"github.com/dpup/sierra-meshrelay/internal/connect"
+	"github.com/dpup/sierra-meshrelay/internal/control"
 	"github.com/dpup/sierra-meshrelay/internal/nodelink"
 	"github.com/dpup/sierra-meshrelay/internal/relayclient"
 	"github.com/dpup/sierra-meshrelay/meshproto"
@@ -32,10 +33,18 @@ var version = "dev"
 const usage = `meshbridge connects a MeshCore companion node to the SIERRA Mesh Relay.
 
 Usage:
+  meshbridge setup [-passphrase words] [-host addr]
+                                  Pair this bridge with SIERRA and write its config
   meshbridge run [-config path]   Run the bridge in the foreground
+  meshbridge status               Show what the running bridge is doing
+  meshbridge pause [1h|tomorrow|until-resumed]
+                                  Stop sharing the node (default 1h)
+  meshbridge resume               Start sharing again
   meshbridge find-node -host addr Connect to a TCP node and print its identity
   meshbridge connect <gateway>    Use a remote gateway as a local TCP companion port
   meshbridge version              Print version and build info
+
+Every command takes -config (default: this OS's config path).
 `
 
 func main() {
@@ -47,6 +56,14 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		err = cmdRun(os.Args[2:])
+	case "setup":
+		err = cmdSetup(os.Args[2:])
+	case "status":
+		err = cmdStatus(os.Args[2:])
+	case "pause":
+		err = cmdPause(os.Args[2:])
+	case "resume":
+		err = cmdResume(os.Args[2:])
 	case "connect":
 		err = cmdConnect(os.Args[2:])
 	case "find-node":
@@ -69,6 +86,7 @@ func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	path := fs.String("config", config.DefaultPath(), "config file")
 	logJSON := fs.Bool("log-json", false, "log as JSON")
+	controlAddr := fs.String("control", control.DefaultAddr, `local control API address ("off" to disable)`)
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load(*path)
@@ -88,10 +106,26 @@ func cmdRun(args []string) error {
 
 	log.Info("meshbridge starting", "version", version, "gateway", cfg.Gateway, "relay", cfg.Relay,
 		"node", fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort))
+	dir := filepath.Dir(*path)
 	b := bridge.New(bridge.Options{
 		Config: cfg, Opener: opener, Log: log, Version: version,
 		LinkKind: meshproto.LinkTCP, LinkDetail: fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort),
+		StatePath: filepath.Join(dir, "state.json"),
 	})
+	if *controlAddr != "off" {
+		tok, err := control.LoadOrCreateToken(filepath.Join(dir, control.TokenFile))
+		if err != nil {
+			log.Warn("control API disabled: can't create its secret", "error", err)
+		} else {
+			srv := &control.Server{Bridge: b, Token: tok, Gateway: cfg.Gateway, Version: version}
+			go func() {
+				if err := srv.ListenAndServe(ctx, *controlAddr); err != nil {
+					log.Warn("control API stopped", "addr", *controlAddr, "error", err)
+				}
+			}()
+			log.Info("control API listening", "addr", *controlAddr)
+		}
+	}
 	if err := b.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
@@ -132,30 +166,12 @@ func cmdFindNode(args []string) error {
 	if *host == "" {
 		return errors.New("-host is required for now")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	link, err := nodelink.TCP{Host: *host, Port: *port}.Open(ctx)
+	id, detail, err := identifyTCP(*host, *port)
 	if err != nil {
 		return err
 	}
-	defer link.Close()
-	frames := make(chan []byte, 64)
-	go func() {
-		defer close(frames)
-		for {
-			f, err := link.ReadFrame()
-			if err != nil {
-				return
-			}
-			frames <- f
-		}
-	}()
-	id, err := companion.Identify(ctx, frames, link.WriteFrame, 5*time.Second)
-	if err != nil {
-		return fmt.Errorf("identity check against %s: %w", link.Detail(), err)
-	}
-	fmt.Printf("Found: %s\n  link    %s %s\n  pubkey  %s\n  model   %s\n  fw      %s\n",
-		id.Name, link.Kind(), link.Detail(), id.Pubkey, id.Model, id.FW)
+	fmt.Printf("Found: %s\n  link    tcp %s\n  pubkey  %s\n  model   %s\n  fw      %s\n",
+		id.Name, detail, id.Pubkey, id.Model, id.FW)
 	return nil
 }
 

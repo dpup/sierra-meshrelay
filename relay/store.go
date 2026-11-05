@@ -75,6 +75,20 @@ CREATE TABLE IF NOT EXISTS leases (
 	bytes_from_node  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS leases_by_start ON leases (started_at);
+CREATE TABLE IF NOT EXISTS invites (
+	id              TEXT PRIMARY KEY,
+	passphrase_hash TEXT NOT NULL,
+	gateway         TEXT NOT NULL DEFAULT '',
+	name_prefix     TEXT NOT NULL DEFAULT '',
+	max_uses        INTEGER NOT NULL,
+	uses            INTEGER NOT NULL DEFAULT 0,
+	expires_at      INTEGER NOT NULL,
+	expected_pubkey TEXT NOT NULL DEFAULT '',
+	note            TEXT NOT NULL DEFAULT '',
+	revoked         INTEGER NOT NULL DEFAULT 0,
+	created_by      TEXT NOT NULL DEFAULT '',
+	created_at      INTEGER NOT NULL
+);
 `
 
 // OpenStore opens (creating if needed) the relay database at path. The journal

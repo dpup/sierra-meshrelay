@@ -62,8 +62,28 @@ JSON over HTTPS under `/mesh/relay/api/`. Requires an `admin` or `operator` toke
 | `DELETE /gateways/<name>` | Revoke and remove |
 | `POST /clients` `{name, role}` / `DELETE /clients/<name>` | Issue and revoke client tokens |
 | `GET /leases` | Current and recent leases (audit) |
+| `GET /pairings` | Device codes waiting for approval: code, host label, source IP, the node the bridge reported |
+| `POST /pairings/<code>/approve` `{gateway, expected_pubkey?, notes?, repair?}` | Approve a code. Creates the gateway, or with `repair: true` re-pairs an existing one (rotating its token and closing its session with 4001). The pin is `expected_pubkey` or else the node the bridge reported. The code is case- and hyphen-insensitive. |
+| `POST /pairings/<code>/deny` | Refuse a code; the bridge's next poll reads `denied` |
+| `POST /invites` `{gateway? \| name_prefix?, max_uses?, expires_in_hours? \| expires_at?, expected_pubkey?, note?}` | Create a passphrase invite. Returns the passphrase and a `sierramesh://` link **once**. Single use with `gateway`; `name_prefix` names gateways `<prefix>-1`, `-2`… (up to 100 uses). Expires in 7 days by default, 30 at most. |
+| `GET /invites` / `DELETE /invites/<id>` | List invites (never the passphrase) / revoke one. Revoking doesn't touch gateways already created from it. |
 
 A minimal read-only status page (gateways, online/offline, last seen) is a nice-to-have and is useful during the pilot.
+
+### Pairing (implementation)
+
+- **Bridge endpoints** `POST /api/pair/start` and `POST /api/pair/poll` have no auth: a bridge being paired has no token. They answer in the spec's exact shapes (`{"error":"invalid_passphrase"}` with 403, 429 when rate-limited) rather than the admin API's error envelope.
+- **Device codes live in memory.** A relay restart drops pending codes, and the bridge's next poll reads `expired` (`meshbridge setup` offers a new code). Approval mints the gateway's token at once and holds it in memory until the bridge's next poll collects it, exactly once. The store only ever has its hash.
+- **A poll needs the `poll_secret`.** Unknown, consumed, expired and wrong-secret polls all read `expired`. Polling faster than half the interval gets 429.
+- **Passphrases** are four words from the BIP-39 English list (2,048 words, 44 bits), stored as bcrypt hashes in the `invites` table. Redemption compares against every active invite, which is fine at SIERRA's scale. Every failure (wrong, expired, used up, revoked, or a node that doesn't match `expected_pubkey`) is the same 403.
+- **Limits:** `pair/start` 20 per IP per 10 min; passphrase attempts 10 per IP and 200 in total per hour; at most 50 pending codes. Tune with `Config.Pairing`.
+- **Notifications:** each redemption or approval adds a `paired` or `repaired` gateway event and logs at warn level with the source IP and host label, so admins can spot one they didn't expect.
+- **`Config.PublicBaseURL`** (default `https://data.sierragridteam.org`) builds the `verification_url` and the `relay` URL handed to a paired bridge.
+- **Not built yet:** the approval page at `/mesh/pair`, which `verification_url` points to. Admins approve with the API for now.
+
+### Pause (implementation)
+
+`node_status` with `state: "paused"` ends any lease at once with `lease_ending` reason `host_paused` (`in_s: 0`), and new clients get `gateway_status` (carrying `until`) then `error` `node_paused`. The public status reports `node_state: "paused"` and `ready: false`. Leases are available again as soon as the bridge reports `connected`.
 
 ### Operational details
 

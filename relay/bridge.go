@@ -309,7 +309,12 @@ func (r *Relay) updateNode(s *bridgeSession, n NodeInfo, pinned, mismatch string
 	g.pinned, g.mismatch = pinned, mismatch
 	if l := g.lease; l != nil {
 		l.holder.Notify(r.gatewayStatusLocked(g))
-		if mismatch != "" || (n.State == NodeConnected && !r.usableLocked(g)) {
+		switch {
+		case n.State == NodePaused:
+			// Pausing is the host's right: the lease ends at once, and new
+			// clients get node_paused until the bridge reports connected.
+			r.endLeaseLocked(l, ReasonHostPaused, true)
+		case mismatch != "" || (n.State == NodeConnected && !r.usableLocked(g)):
 			r.endLeaseLocked(l, ReasonPubkeyMismatch, true)
 		}
 	}
@@ -335,6 +340,8 @@ func (r *Relay) unusableReasonLocked(g *gwState) string {
 		return ReasonGatewayOffline
 	case g.mismatch != "":
 		return ReasonPubkeyMismatch
+	case g.node.State == NodePaused:
+		return ReasonHostPaused
 	case g.node.State != NodeConnected:
 		return ReasonGatewayOffline
 	default:

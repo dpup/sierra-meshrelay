@@ -265,3 +265,76 @@ func NormalizePubkey(s string) (string, bool) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s, pubkeyPattern.MatchString(s)
 }
+
+// --- Pairing (HTTP, under /mesh/relay/api/pair/) ----------------------------
+
+// Pairing poll statuses (PairResult.Status).
+const (
+	PairPending  = "pending"
+	PairApproved = "approved"
+	PairDenied   = "denied"
+	PairExpired  = "expired"
+)
+
+// ErrInvalidPassphrase is pair/start's 403 body code for a wrong, expired,
+// used-up or revoked passphrase. It deliberately doesn't say which.
+const ErrInvalidPassphrase = "invalid_passphrase"
+
+// PairNode is the node a bridge reports when pairing: Node plus its link kind.
+// State may be NodeDisconnected if no node has been found yet.
+type PairNode struct {
+	Node
+	Link string `json:"link,omitempty"`
+}
+
+// PairStartRequest is the body of POST pair/start (no auth).
+type PairStartRequest struct {
+	Agent     Agent    `json:"agent"`
+	HostLabel string   `json:"host_label,omitempty"`
+	Node      PairNode `json:"node"`
+	// Passphrase, when present, redeems a pre-approved invite.
+	Passphrase string `json:"passphrase,omitempty"`
+}
+
+// PairStartResponse starts the device-code flow (pair/start without a
+// passphrase).
+type PairStartResponse struct {
+	PairID          string `json:"pair_id"`
+	PollSecret      string `json:"poll_secret"`
+	UserCode        string `json:"user_code"` // XXX-XXX
+	VerificationURL string `json:"verification_url"`
+	ExpiresIn       int    `json:"expires_in"` // seconds
+	Interval        int    `json:"interval"`   // seconds between polls
+}
+
+// PairPollRequest is the body of POST pair/poll.
+type PairPollRequest struct {
+	PairID     string `json:"pair_id"`
+	PollSecret string `json:"poll_secret"`
+}
+
+// PairResult answers pair/poll, and pair/start with a valid passphrase. An
+// approved result carries the bridge token, delivered exactly once.
+type PairResult struct {
+	Status         string `json:"status"`
+	Gateway        string `json:"gateway,omitempty"`
+	Token          string `json:"token,omitempty"`
+	Relay          string `json:"relay,omitempty"` // wss://…/mesh/relay
+	ExpectedPubkey string `json:"expected_pubkey,omitempty"`
+}
+
+// PairError is the body of a pairing error response, e.g. 403
+// {"error":"invalid_passphrase"}.
+type PairError struct {
+	Error string `json:"error"`
+}
+
+// NormalizePassphrase applies the spec's forgiving match: lowercase, with
+// spaces, hyphens, commas and runs of them all treated as one separator.
+// "Maple River quartz  otter" becomes "maple-river-quartz-otter".
+func NormalizePassphrase(s string) string {
+	words := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return r == ' ' || r == '-' || r == ',' || r == '\t' || r == '\n' || r == '\r'
+	})
+	return strings.Join(words, "-")
+}

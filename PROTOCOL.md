@@ -22,8 +22,10 @@ Why this split:
 | Area | Relay | meshbridge | meshcore-ts |
 |---|---|---|---|
 | Bridge and client WebSockets, leases, errors, close codes | Done | Bridge side done (M1: TCP node link) | n/a |
-| Pairing, `paused`, leave, diagnostics | Not yet built | Not started | n/a |
-| Passphrase invites | Not yet built | Not started | n/a |
+| Pairing (device code) | Done (admin API; no approval page yet) | Done (`meshbridge setup`) | n/a |
+| Passphrase invites | Done | Done | n/a |
+| `paused` | Done | Done (`meshbridge pause`/`resume`, local control API) | n/a |
+| Leave, diagnostics | Not yet built | Not started | n/a |
 | Client tickets (browser auth) | Not yet built | n/a | Not started |
 | Client relay transport | n/a | `connect` shim done | Not started |
 | Shared Go types (`meshproto`) | Uses them | Uses them | n/a |
@@ -154,6 +156,8 @@ Pausing is the host's right. The relay never overrides it.
 ```json
 { "type": "stats", "uptime_s": 86400, "node_link_reconnects": 2, "frames_to_node": 1204, "frames_from_node": 3388, "relay_reconnects": 1 }
 ```
+
+Counters run from bridge start. `frames_from_node` counts every frame read from the node after the identity check, including those dropped because no client was attached. `frames_to_node` counts frames written to the node.
 
 ### `attach` / `detach` (relay → bridge)
 
@@ -362,12 +366,14 @@ Upload a diagnostics bundle the host chose to send.
 
 ## Identity check (bridge)
 
-When the bridge opens the node link, it sends `APP_START` with app name `sierra-meshbridge`, reads `SELF_INFO`, and takes the node's public key from it.
+When the bridge opens the node link, it sends `APP_START` with app name `sierra-meshbridge`, reads `SELF_INFO`, and takes the node's public key and name from it. It then sends `DEVICE_QUERY` and reads `DEVICE_INFO` for the firmware version and board model (`hello.node.fw` and `model`). That step is best effort: a node that doesn't answer still passes. `DEVICE_INFO` also carries the node's BLE PIN, so the bridge reads only those two fields and never logs the frame.
 
 - If `expected_pubkey` is configured and doesn't match, the node is `mismatch`. The bridge reports it and forwards nothing.
 - If `expected_pubkey` isn't configured, the bridge reports the key it found. The relay pins it on first sight and flags any later change.
 
 This is the only time the bridge parses companion frames.
+
+A node in `mismatch` is still reported with its `pubkey` and `name`, so an admin can see which node is plugged in. The relay only pins keys from a `connected` node.
 
 ## Keepalive and close
 

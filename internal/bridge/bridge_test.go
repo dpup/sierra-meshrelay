@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -416,4 +418,89 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func TestPauseReleasesNodeAndResumes(t *testing.T) {
+	h := start(t, setup{})
+	s := h.session()
+	expectNode(t, s, meshproto.NodeConnected)
+	h.attach(s)
+
+	until := time.Now().Add(time.Hour).Truncate(time.Second)
+	h.bridge.Pause(until)
+	n := expectNode(t, s, meshproto.NodePaused)
+	if n.Until != until.UTC().Format(time.RFC3339) || n.Pubkey != "" {
+		t.Fatalf("paused node = %+v", n)
+	}
+	// The node's one connection is free for the host's own app.
+	deadline := time.Now().Add(2 * time.Second)
+	for h.node.Push([]byte{0x83}) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the bridge kept its node connection while paused")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := s.NoFrame(100 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.bridge.Status(); !st.Paused || !st.PauseUntil.Equal(until) {
+		t.Fatalf("status %+v", st)
+	}
+
+	accepted := h.node.Accepted()
+	h.bridge.Resume()
+	expectNode(t, s, meshproto.NodeConnected)
+	if h.node.Accepted() != accepted+1 {
+		t.Fatalf("node accepted %d, want %d", h.node.Accepted(), accepted+1)
+	}
+}
+
+func TestTimedPauseRunsOut(t *testing.T) {
+	h := start(t, setup{})
+	s := h.session()
+	expectNode(t, s, meshproto.NodeConnected)
+	h.bridge.Pause(time.Now().Add(300 * time.Millisecond))
+	expectNode(t, s, meshproto.NodePaused)
+	expectNode(t, s, meshproto.NodeConnected)
+	if p, _ := h.bridge.Paused(); p {
+		t.Fatal("still paused after the pause ran out")
+	}
+}
+
+func TestPauseUntilResumedSurvivesRestart(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state.json")
+	h := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	s := h.session()
+	expectNode(t, s, meshproto.NodeConnected)
+	h.bridge.Pause(time.Time{})
+	n := expectNode(t, s, meshproto.NodePaused)
+	if n.Until != "" {
+		t.Fatalf("until-resumed pause reported until %q", n.Until)
+	}
+	h.stop()
+
+	// A new bridge with the same state file starts paused and says so in hello.
+	h2 := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	s2 := h2.session()
+	if s2.Hello.Node.State != meshproto.NodePaused {
+		t.Fatalf("hello after restart: %+v", s2.Hello.Node)
+	}
+	if h2.node.Accepted() != 0 {
+		t.Fatal("a bridge paused until resumed opened the node link")
+	}
+	h2.bridge.Resume()
+	expectNode(t, s2, meshproto.NodeConnected)
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("state file still there after resume: %v", err)
+	}
+}
+
+func TestTimedPauseDoesNotSurviveRestart(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state.json")
+	h := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	h.bridge.Pause(time.Now().Add(time.Hour))
+	h.stop()
+	h2 := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	s2 := h2.session()
+	expectNode(t, s2, meshproto.NodeConnected)
 }

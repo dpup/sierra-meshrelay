@@ -2,9 +2,11 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -135,4 +137,47 @@ func DefaultPath() string {
 	default:
 		return "/etc/meshbridge/meshbridge.toml"
 	}
+}
+
+// Save writes c to path, readable only by its owner (it holds the bridge
+// token). The directory is created if needed. The write is atomic, so a
+// crash never leaves a half-written config.
+func Save(path string, c Config) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	buf.WriteString("# meshbridge config, written by `meshbridge setup`.\n# It holds this bridge's token: keep it private.\n\n")
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// LoadRaw reads path over the defaults without validating, for setup, which
+// edits a config that may not be complete yet. A missing file is not an error.
+func LoadRaw(path string) (Config, bool, error) {
+	c := Default()
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return c, false, nil
+	}
+	_, err := toml.DecodeFile(path, &c)
+	return c, err == nil, err
+}
+
+// HTTPBase turns the relay's WebSocket base URL (wss://host/mesh/relay) into
+// its HTTP API base (https://host/mesh/relay/api).
+func HTTPBase(relay string) string {
+	relay = strings.TrimRight(relay, "/")
+	switch {
+	case strings.HasPrefix(relay, "wss://"):
+		relay = "https://" + strings.TrimPrefix(relay, "wss://")
+	case strings.HasPrefix(relay, "ws://"):
+		relay = "http://" + strings.TrimPrefix(relay, "ws://")
+	}
+	return relay + "/api"
 }
