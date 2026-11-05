@@ -1,0 +1,447 @@
+# SIERRA Mesh Relay — Wire Protocol v1
+
+*The canonical spec. The relay, the bridge, and client libraries all implement this. This repo (`dpup/sierra-meshrelay-protocol`) holds the only copy: other repos link here instead of keeping their own. Change the spec and the Go package in the same pull request.*
+
+## Implementations
+
+| Component | Language | Repo | Role |
+|---|---|---|---|
+| **Relay** | Go | `dpup/sierra-data` | Accepts bridges and clients, leases, pairing, admin API |
+| **meshbridge** | Go | `dpup/sierra-meshbridge` | Bridge daemon at host sites. Also `meshbridge connect`, a localhost TCP shim for TCP-only clients (official MeshCore app, meshcore-cli). |
+| **sierra-meshrelay-protocol** | Go | `dpup/sierra-meshrelay-protocol` (this repo) | This spec, plus message types, close codes, error codes and constants (package `meshproto`). Imported by both the relay and meshbridge so they can't drift. A conformance test suite is planned. |
+| **meshcore-ts relay transport** | TypeScript | `dpup/meshcore-ts` | `MeshCoreClient.relay(…)`: a native client of this protocol, so any meshcore-ts app can use a gateway with no shim |
+| **meshcore-mcp** | TypeScript | `dpup/meshcore-mcp` | Uses the meshcore-ts relay transport, so Elmer and other MCP clients can work any gateway remotely |
+| **meshcore-sim** | TypeScript | `@dpup/meshcore-sim` | Simulated companion node for testing bridges and clients without hardware |
+
+Why this split:
+- **Bridges and the relay are Go.** The bridge only frames bytes and does one identity check, so it doesn't need a MeshCore client library. It needs static binaries for every OS, a pure-Go serial library, and native service management, and sharing a module with the relay keeps the protocol from drifting.
+- **Clients are TypeScript.** They need the full companion protocol, which meshcore-ts already provides.
+
+## Implementation status (Nov 5, 2026)
+
+| Area | Relay | meshbridge | meshcore-ts |
+|---|---|---|---|
+| Bridge and client WebSockets, leases, errors, close codes | Done | Bridge side done (M1: TCP node link) | n/a |
+| Pairing, `paused`, leave, diagnostics | Not yet built | Not started | n/a |
+| Passphrase invites | Not yet built | Not started | n/a |
+| Client tickets (browser auth) | Not yet built | n/a | Not started |
+| Client relay transport | n/a | `connect` shim done | Not started |
+| Shared Go module (`sierra-meshrelay-protocol`) | Migrating | Uses it | n/a |
+
+Update this table as things land.
+
+## Overview
+
+Three parties:
+
+- **Node**: a stock MeshCore companion radio (upstream firmware ≥ 1.18). Speaks the MeshCore companion protocol over USB serial or TCP port 5000.
+- **Bridge**: software at a host's house. Holds the one connection to the node and dials *out* to the relay.
+- **Relay**: runs at `data.sierragridteam.org`. Accepts bridges, and lets authenticated clients talk to a node through its bridge.
+
+```
+ node <--serial/TCP--> bridge ==WSS (bridge dials out)==> relay <==WSS== client
+```
+
+Nothing ever connects in to a host's house. Nothing on the relay gives unauthenticated access to a node.
+
+## Endpoints
+
+| Path | Used by | Subprotocol |
+|---|---|---|
+| `wss://data.sierragridteam.org/mesh/relay/<gateway>/dial` | Bridge | `sierra-mesh-bridge.v1` |
+| `wss://data.sierragridteam.org/mesh/relay/<gateway>` | Client | `sierra-mesh-client.v1` |
+| `https://data.sierragridteam.org/mesh/relay/api/pair/...` | Unpaired bridge | n/a (HTTP, see Pairing) |
+| `https://data.sierragridteam.org/mesh/relay/api/gateway/...` | Paired bridge | n/a (HTTP, see Bridge self-service) |
+| `https://data.sierragridteam.org/mesh/relay/api/tickets` | Browser-client backends | n/a (HTTP, see Client tickets) |
+| `https://data.sierragridteam.org/mesh/relay/api/...` | Admin tools | n/a (see relay spec) |
+
+`<gateway>` is a lowercase name, `[a-z0-9-]{3,40}`, e.g. `avery-ridge`.
+
+## Authentication
+
+- Both bridge and client send `Authorization: Bearer <token>` on the WebSocket upgrade request.
+- Bridge tokens are per gateway. The relay rejects a bridge whose token doesn't belong to `<gateway>`.
+- Client tokens are per person or per agent. They carry a role (see relay spec).
+- Tokens are opaque: 32 random bytes, base64url, prefixed `smb_` (bridge) or `smc_` (client) so they're recognizable if leaked.
+- The relay rejects the upgrade with HTTP 401 for a bad token, 404 for an unknown gateway, and 426 for an unsupported subprotocol.
+
+### Client tickets (for browsers)
+
+Browsers can't set an `Authorization` header on a WebSocket. Browser clients use a short-lived ticket instead. Never put a long-lived token in a URL, because URLs end up in logs and browser history.
+
+1. With the client token, `POST https://data.sierragridteam.org/mesh/relay/api/tickets` `{ "gateway": "avery-ridge" }` → `{ "ticket": "smt_…", "expires_in": 60 }`.
+   - The browser app gets the ticket from its own backend, which holds the client token. A browser should never hold an `smc_` token itself.
+2. Connect to `wss://data.sierragridteam.org/mesh/relay/avery-ridge?ticket=smt_…` with subprotocol `sierra-mesh-client.v1`.
+
+Ticket rules:
+- Single use, valid for 60 s.
+- Bound to one gateway and to the issuing client's identity and role.
+- Using it consumes it. A reused or expired ticket gets HTTP 401.
+- The relay must strip `ticket` from any URL it logs.
+
+Non-browser clients (meshcore-ts on Node, meshbridge, agents) keep using the `Authorization` header.
+
+## Frames
+
+Each WebSocket message is one of two kinds:
+
+- **Binary message** = exactly one MeshCore companion protocol frame *payload*, without the serial/TCP header.
+  - On the node link, companion frames are wrapped as `[0x3c][len_lo][len_hi][payload]` toward the node and `[0x3e][len_lo][len_hi][payload]` from the node. The bridge strips the header when reading from the node and adds it when writing to the node.
+  - Direction is implied by who sent the message, so no header is needed on the WebSocket.
+  - Max payload: 512 bytes. Anything larger is a protocol error. (Current firmware max frame is 176; this leaves headroom.)
+  - Verified against MeshCore v1.18.0: `ArduinoSerialInterface.cpp` (`checkRecvFrame` / `writeFrame`) and `SerialWifiInterface.cpp` both use `'<'` (0x3c) toward the node and `'>'` (0x3e) from it, each followed by a 2-byte little-endian length. `MAX_FRAME_SIZE` is 176 (`src/helpers/BaseSerialInterface.h`); the firmware drops oversized outgoing frames and truncates oversized incoming ones.
+- **Text message** = one JSON control object with a `type` field. Unknown `type` values are ignored (forward compatibility).
+
+The relay forwards binary messages between the bridge and the client holding the lease, unchanged. It doesn't parse them, except where the relay spec says otherwise.
+
+**Rate limit.** The relay throttles each connection to about 50 messages/s (burst 100). Throttling is backpressure: the relay reads more slowly. It does not drop frames or disconnect, so a node that sends its whole contact list at once is slowed down, not cut off.
+
+## Bridge ↔ relay control messages
+
+### `hello` (bridge → relay, first message, required)
+
+```json
+{
+  "type": "hello",
+  "protocol": 1,
+  "gateway": "avery-ridge",
+  "agent": { "name": "meshbridge", "version": "0.3.1", "os": "linux", "arch": "arm64" },
+  "link": { "kind": "serial", "detail": "/dev/ttyACM0" },
+  "node": { "state": "connected", "pubkey": "a1b2…64 hex", "name": "SIERRA-GW-avery-ridge", "fw": "1.18.0", "model": "Heltec V4" }
+}
+```
+
+- `link.kind`: `serial` or `tcp`. `detail` is informational (port name or `host:port`).
+- `node.state` is one of:
+  - `connected`
+  - `disconnected`
+  - `mismatch`: the node's pubkey doesn't match the bridge's configured `expected_pubkey`.
+  - `paused`: the host paused sharing, and the bridge has released the node. Include `"until": "<RFC 3339 time>"`.
+- When `node.state` isn't `connected`, `pubkey`, `name`, `fw`, and `model` may be omitted.
+- The relay closes the socket with 4003 if `hello` doesn't arrive within 10 seconds.
+
+### `welcome` (relay → bridge)
+
+```json
+{ "type": "welcome", "session": "s_7f3c…", "ping_interval_s": 25, "server_time": "2026-11-03T22:51:00Z" }
+```
+
+The bridge must not send binary messages before `welcome`.
+
+### `node_status` (bridge → relay, on any change)
+
+```json
+{ "type": "node_status", "state": "disconnected", "error": "serial port closed" }
+```
+
+Same `state` values and node fields as `hello.node`. Send it when the node link drops, reconnects, or fails the pubkey check, and when the host pauses or resumes sharing.
+
+```json
+{ "type": "node_status", "state": "paused", "until": "2026-11-04T01:30:00Z" }
+```
+
+When it receives `paused`:
+- The bridge has already closed its node link.
+- The relay ends any active lease with `lease_ending` (reason `host_paused`, `in_s: 0`).
+- New clients get the "gateway unavailable" treatment with code `node_paused`, which follows the existing `node_<state>` pattern.
+- The relay shows the gateway as intentionally unavailable, not failed.
+- Leases resume when the bridge reports `connected`.
+
+Pausing is the host's right. The relay never overrides it.
+
+### `stats` (bridge → relay, every 60 s)
+
+```json
+{ "type": "stats", "uptime_s": 86400, "node_link_reconnects": 2, "frames_to_node": 1204, "frames_from_node": 3388, "relay_reconnects": 1 }
+```
+
+### `attach` / `detach` (relay → bridge)
+
+```json
+{ "type": "attach", "lease": "l_91ad…", "client": "elmer" }
+{ "type": "detach", "lease": "l_91ad…" }
+```
+
+Informational: tells the bridge a client started or stopped using the node. The bridge logs these. If no client is attached, the bridge drops frames that arrive from the node, except for its own identity check.
+
+### `relink` (relay → bridge)
+
+```json
+{ "type": "relink" }
+```
+
+The bridge closes and reopens its connection to the node, then re-runs the identity check and sends `node_status`. Used to clear a stuck node session.
+
+### `update_available` (relay → bridge, optional)
+
+```json
+{ "type": "update_available", "version": "0.4.0", "url": "https://…", "sha256": "…", "sig": "base64 ed25519" }
+```
+
+v1 bridges may log this and do nothing else.
+
+### `error` (either direction)
+
+```json
+{ "type": "error", "code": "frame_too_large", "message": "…" }
+```
+
+Codes the relay sends: `hello_required`, `unsupported_protocol`, `frame_too_large`, `busy`, `gateway_offline`, `pubkey_mismatch`, `pubkey_unverified`, `node_<state>`, `renew_denied`, `unknown_lease`. Treat `message` as free text and don't rely on its content. The relay logs only the `code` and the length of `message` for an `error` that a bridge sends.
+
+## Client ↔ relay control messages
+
+### Getting a lease
+
+A client gets a lease by connecting. The relay grants one only when the bridge is online, the node is `connected`, and the node's pubkey matches the gateway's pinned key. Otherwise:
+
+- **Gateway busy:** the relay sends `error` with `code: "busy"` and closes with 4029.
+- **Gateway unavailable:** the relay sends `gateway_status`, then `error` with a `code` (`gateway_offline`, `pubkey_mismatch`, `pubkey_unverified`, or `node_<state>`), then closes with 1000.
+
+An `admin` can append `?preempt=1` to the client URL. That takes the lease from its current holder, who gets `lease_ending` with reason `preempted`. A non-admin who asks for preemption gets HTTP 403.
+
+### `lease` (relay → client, after a successful upgrade)
+
+```json
+{ "type": "lease", "lease": "l_91ad…", "gateway": "avery-ridge", "expires_at": "2026-11-03T23:21:00Z", "node": { "state": "connected", "pubkey": "…", "name": "…" } }
+```
+
+The client may send binary frames after `lease`. The client is responsible for the normal companion handshake (`APP_START`, etc.).
+
+### `lease_ending` (relay → client)
+
+```json
+{ "type": "lease_ending", "lease": "l_91ad…", "in_s": 60, "reason": "expiry" }
+```
+
+`reason` is one of the following. A client must treat any reason it doesn't recognize as "the lease is ending."
+
+- `expiry`: the lease ran out.
+- `preempted`: an admin took over.
+- `gateway_offline`: the bridge disconnected.
+- `idle`: no frames in either direction for 10 min.
+- `revoked`: the client's token was revoked, the gateway was deleted, or the host left the network.
+- `pubkey_mismatch`: the node started reporting a pubkey that doesn't match the pin.
+- `relay_shutdown`: the relay is restarting.
+- `host_paused`: the host paused sharing. Always `in_s: 0`.
+
+With `in_s` > 0 it's a warning: the relay sends one 60 s before expiry, and a `renew` cancels it. With `in_s: 0` the lease has already ended, and the relay closes the socket with 1000.
+
+`renew` extends the lease by another 30 min. Renewals stop at 8 h from the start of the lease. After that the relay answers `renew` with `error` `renew_denied`. A `renew` for a different lease id gets `error` `unknown_lease`.
+
+### `renew` (client → relay)
+
+```json
+{ "type": "renew", "lease": "l_91ad…" }
+```
+
+Extends the lease if policy allows. The relay answers with a new `lease` message.
+
+### `gateway_status` (relay → client, on change)
+
+```json
+{ "type": "gateway_status", "bridge": "offline", "node": { "state": "disconnected" } }
+{ "type": "gateway_status", "bridge": "online", "node": { "state": "paused", "until": "2026-11-04T01:30:00Z" } }
+```
+
+## Pairing (HTTP)
+
+A freshly installed bridge has no token. There are two ways to get one, and both end with the relay delivering the token straight to the bridge, so nobody copies a secret.
+
+- **Passphrase (pre-approved).** An admin creates an invite ahead of time and gives the host a passphrase, for example `maple-river-quartz-otter`. The host types it into setup, and the bridge is approved immediately with no waiting.
+- **Device code (approve on the spot).** The bridge shows a short code, the host texts it to an admin, and the admin approves it. This is the same pattern as signing a TV app into an account, and it's the fallback when the host has no passphrase.
+
+All JSON over HTTPS, under `https://data.sierragridteam.org/mesh/relay/api/`.
+
+### `POST pair/start` (bridge, no auth)
+
+Request:
+```json
+{
+  "agent": { "name": "meshbridge", "version": "0.3.1", "os": "windows", "arch": "amd64" },
+  "host_label": "Jay's PC",
+  "node": { "state": "connected", "pubkey": "…", "name": "JayNode", "fw": "1.18.0", "model": "Heltec V4", "link": "serial" }
+}
+```
+- `host_label` is optional and comes from the computer name. It helps the admin recognize the request.
+- `node` may be `{ "state": "disconnected" }` if no node has been found yet. Pairing can happen first.
+- `passphrase` is optional. If present, the relay redeems the matching invite (see Passphrase invites below).
+
+Response `200` with a valid passphrase. The response is approved immediately, with no polling:
+```json
+{
+  "status": "approved",
+  "gateway": "jay-murphys",
+  "token": "smb_…",
+  "relay": "wss://data.sierragridteam.org/mesh/relay",
+  "expected_pubkey": "…"
+}
+```
+
+With a bad passphrase, the response is HTTP `403` `{ "error": "invalid_passphrase" }`. That one status covers wrong, expired, used-up, and revoked passphrases, so a guesser learns nothing. The bridge says "That passphrase didn't work" and offers the device-code flow instead.
+
+Response `200` without a passphrase (device-code flow):
+```json
+{
+  "pair_id": "p_3c9e…",
+  "poll_secret": "random 32 bytes, base64url",
+  "user_code": "K7M-4QX",
+  "verification_url": "https://data.sierragridteam.org/mesh/pair?code=K7M-4QX",
+  "expires_in": 600,
+  "interval": 5
+}
+```
+- `user_code`: 6 characters from an unambiguous alphabet (no `0 O 1 I L`), shown as `XXX-XXX`.
+- The bridge shows `user_code` large, plus the URL and a "text this code to your SIERRA contact" hint.
+- The relay rate-limits `pair/start` per source IP and caps pending pairs. It returns HTTP 429 when either limit is hit.
+
+### `POST pair/poll` (bridge)
+
+Request: `{ "pair_id": "…", "poll_secret": "…" }`. Poll every `interval` seconds.
+
+| Response | Meaning |
+|---|---|
+| `{"status":"pending"}` | Keep polling |
+| `{"status":"approved","gateway":"jay-murphys","token":"smb_…","relay":"wss://data.sierragridteam.org/mesh/relay","expected_pubkey":"…"}` | Done. Delivered **exactly once**; the pairing record is then consumed. |
+| `{"status":"denied"}` | Admin rejected it. Show a friendly message. |
+| `{"status":"expired"}` | Code timed out, or it was already consumed. Offer "Get a new code." |
+| HTTP 429 | Polling too fast. Back off. |
+
+- `poll_secret` is what protects the token. Knowing `user_code` alone can't collect it. The relay compares it in constant time.
+- `expected_pubkey` is the pubkey the admin approved, usually the one reported in `pair/start`. The bridge saves it to config. The relay pins the same key for the gateway, so the bridge's first `hello` passes the pin check.
+
+### Approval (admin side)
+
+Admins approve through the relay admin API or the admin page at `https://data.sierragridteam.org/mesh/pair`; see the relay spec. Approval either creates a new gateway or **re-pairs an existing one** (for example, the host replaced their PC). Re-pairing rotates that gateway's token. Any old bridge session is closed with 4001.
+
+### Passphrase invites
+
+An invite is an approval created ahead of time. An admin creates it through the admin API, and the relay returns the passphrase **once**. The admin sends it to the host by text, email, or printed card.
+
+**Passphrase format**
+- 4 words from a fixed list of 2,048 short, common, easy-to-spell English words (≈44 bits).
+- Joined by hyphens, all lowercase, e.g. `maple-river-quartz-otter`.
+
+**Matching is forgiving.** The relay lowercases the input and treats spaces, hyphens, commas, and runs of them as separators. So `Maple River quartz  otter` matches. Hosts type passphrases from text messages on phones, and autocorrect and capitalization shouldn't make them fail.
+
+**Invite fields**
+| Field | Meaning |
+|---|---|
+| `gateway` | Gateway name the redeemer gets. If the gateway already exists, redeeming re-pairs it (rotating the token). Omit it for a multi-use invite. |
+| `name_prefix` | For multi-use invites: gateways are named `<prefix>-<n>`, e.g. `workshop-1`, `workshop-2`. Admins can rename them later. |
+| `max_uses` | Default 1. Above 1 is for setup sessions where several hosts install at once. |
+| `expires_at` | Default 7 days, max 30. |
+| `expected_pubkey` | Optional. If set, the bridge's reported node pubkey must match or the redemption fails with `invalid_passphrase`. If unset, the node pubkey reported at redemption is pinned. If no node was connected at redemption, the first pubkey in `hello` is pinned. |
+| `note` | Free text for admins, e.g. "Jay, Murphys, Heltec V4". |
+
+**Security**
+- The passphrase is a bearer secret with limited uses. The relay stores only a hash. Use a slow hash (argon2id or bcrypt), because 44 bits isn't enough against an offline attack on a fast hash.
+- Rate-limit `pair/start` attempts that include a passphrase: per source IP (e.g. 10 per hour) and globally. With that limit, guessing 44 bits online is impractical.
+- Every redemption is logged and notifies admins: gateway, invite, source IP, host label, node pubkey.
+- Invites can be revoked before use. Revoking doesn't affect gateways already created from it. Revoke those separately.
+
+**Deep link (optional, recommended)**
+`sierramesh://pair?passphrase=maple-river-quartz-otter`
+On a machine with meshbridge installed, opening this link opens setup with the passphrase filled in. The admin can text the link instead of the bare passphrase, so the host just taps it. The bridge still shows the passphrase and asks the host to confirm before redeeming it. A link alone must never pair a machine silently.
+
+## Bridge self-service (HTTP)
+
+Authenticated with the bridge token: `Authorization: Bearer smb_…`.
+
+### `POST gateway/leave`
+
+The host clicked "Leave SIERRA network." The relay revokes the token, marks the gateway `left` (keeping its history), closes the live session with 4001, and notifies admins. Active leases end with reason `revoked`. The bridge then deletes its token and, if asked, uninstalls its service.
+
+### `POST gateway/diagnostics`
+
+Upload a diagnostics bundle the host chose to send.
+- Body: `application/zip`, at most 5 MB (HTTP 413 if larger).
+- Contents: bridge logs, redacted config (no token), a status snapshot, OS and version, serial port list, network interface summary.
+- Must not contain companion frame payloads.
+- Response: `{ "id": "d_…", "received_at": "…" }`. The bridge shows the host "Sent. Reference d_…".
+- The relay keeps bundles for 30 days, visible to admins only.
+
+## Identity check (bridge)
+
+When the bridge opens the node link, it sends `APP_START` with app name `sierra-meshbridge`, reads `SELF_INFO`, and takes the node's public key from it.
+
+- If `expected_pubkey` is configured and doesn't match, the node is `mismatch`. The bridge reports it and forwards nothing.
+- If `expected_pubkey` isn't configured, the bridge reports the key it found. The relay pins it on first sight and flags any later change.
+
+This is the only time the bridge parses companion frames.
+
+## Keepalive and close
+
+- Both sides send WebSocket pings every `ping_interval_s` (default 25 s). This keeps proxies with an idle timeout of about 100 s from dropping the socket.
+- Either side closes after 3 missed pongs.
+
+Close codes:
+
+| Code | Meaning | Bridge reaction |
+|---|---|---|
+| 1000 | Normal | Reconnect with backoff |
+| 1001 | Going away: the relay is restarting | Reconnect with backoff |
+| 1009 | Message too big (text over 8 KiB) | Reconnect with backoff, and fix the sender |
+| 4001 | Bad or revoked token | Back off 15 min, log loudly |
+| 4002 | Gateway name doesn't match token | Back off 15 min, log loudly |
+| 4003 | Protocol error or missing `hello` | Reconnect with backoff |
+| 4004 | Unsupported protocol version | Back off 1 h, log "update required" |
+| 4009 | Replaced: a newer session for this gateway connected | Reconnect with backoff (2 bridges with the same token will flap; that's visible in relay logs) |
+| 4029 | (Client) Gateway busy, lease held by someone else | n/a |
+
+Bridge reconnect backoff: start at 1 s, double up to 60 s, add ±20% jitter. Reset after 5 minutes connected.
+
+## Client libraries
+
+Any client of `sierra-mesh-client.v1` is a normal MeshCore companion app, connected through the relay instead of TCP or serial. It must:
+
+- Send each companion frame payload as one binary message, with no `<` header and no length. Received binary messages are payloads too.
+- Wait for `lease` before sending frames, then do the normal companion handshake (`APP_START` etc.).
+- Handle `lease_ending`. When `in_s > 0` and the app is still in use, send `renew` automatically. Treat `in_s: 0`, or any unknown `reason`, as disconnected.
+- Turn relay `error` codes into clear messages: `busy`, `gateway_offline`, `node_paused`, `pubkey_mismatch`, `pubkey_unverified`, `renew_denied`. Never show the `message` field as if it were authoritative.
+- Reconnect only when the user or app asks to. Don't auto-reconnect in a loop on 4029, because someone else holds the lease.
+
+### meshcore-ts
+
+Add a relay transport next to `tcp()` and `serial()`:
+
+```ts
+const client = await MeshCoreClient.relay({
+  url: "wss://data.sierragridteam.org/mesh/relay",
+  gateway: "avery-ridge",
+  token: process.env.SIERRA_MESH_TOKEN,      // Node: bearer header
+  // or: ticket: "smt_…"                     // browser: one-time ticket
+});
+```
+
+- Implement it as a meshcore.js connection class whose send and receive work on frame payloads. That's a small adapter, since meshcore.js already frames payloads for its TCP and serial connections.
+- Expose lease events (`lease`, `leaseEnding`, `gatewayStatus`) as typed events. Expose relay errors as typed errors.
+- Node gets the `Authorization` header through the WebSocket library's headers option. In the browser, accept only `ticket`.
+
+### meshcore-mcp
+
+Add a third transport option next to `MESHCORE_HOST` and `MESHCORE_SERIAL_PATH`. Exactly one of the three must be set.
+
+```
+MESHCORE_RELAY_URL=wss://data.sierragridteam.org/mesh/relay
+MESHCORE_RELAY_GATEWAY=avery-ridge
+MESHCORE_RELAY_TOKEN=smc_…
+```
+
+- Use an `agent`-role client token.
+- Show lease state in the MCP server's status output. That way an agent can tell "someone else has this gateway" apart from "the gateway is down."
+
+## Testing
+
+- **The shared conformance suite** will live in the `sierra-meshrelay-protocol` Go module (not built yet). The relay runs the server half against a scripted bridge and client. meshbridge runs the bridge half against a scripted relay.
+- **meshcore-sim** is the reference fake node. meshbridge's tests run it as a TCP companion (if it can't listen on TCP yet, that's a small addition to make there). This tests the bridge against an independent implementation, not one written alongside it.
+- **End-to-end:** meshcore-sim → meshbridge → relay → meshcore-ts relay transport. A meshcore-ts client should get identical results whether it connects to meshcore-sim over TCP directly or through the relay. That's the main end-to-end test.
+
+## Versioning
+
+- The subprotocol name carries the major version. Breaking changes mean `v2` and a new subprotocol name.
+- Additive changes (new optional fields, new message types) keep `v1`. Receivers ignore unknown fields and types.
+- `hello.protocol` carries the same major version as a sanity check.
+
+## Design constraint
+
+Keep the protocol small enough for a future embedded bridge (ESP32-class): JSON control messages are tiny and infrequent, binary frames are passed through unchanged, and nothing requires the bridge to keep companion-protocol state beyond the identity check.

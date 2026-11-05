@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dpup/sierra-meshbridge/internal/companion"
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/internal/companion"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // Link is an open connection to a node. ReadFrame and WriteFrame may be called

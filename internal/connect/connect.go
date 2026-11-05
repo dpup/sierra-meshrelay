@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dpup/sierra-meshbridge/internal/companion"
-	"github.com/dpup/sierra-meshbridge/internal/relayclient"
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/internal/companion"
+	"github.com/dpup/sierra-meshrelay/internal/relayclient"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // Dialer takes a lease. relayclient.Dial is the real one.

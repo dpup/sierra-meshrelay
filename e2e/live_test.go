@@ -28,14 +28,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dpup/sierra-meshbridge/internal/bridge"
-	"github.com/dpup/sierra-meshbridge/internal/companion"
-	"github.com/dpup/sierra-meshbridge/internal/config"
-	"github.com/dpup/sierra-meshbridge/internal/connect"
-	"github.com/dpup/sierra-meshbridge/internal/fakenode"
-	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	"github.com/dpup/sierra-meshbridge/internal/relayclient"
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/internal/bridge"
+	"github.com/dpup/sierra-meshrelay/internal/companion"
+	"github.com/dpup/sierra-meshrelay/internal/config"
+	"github.com/dpup/sierra-meshrelay/internal/connect"
+	"github.com/dpup/sierra-meshrelay/internal/fakenode"
+	"github.com/dpup/sierra-meshrelay/internal/nodelink"
+	"github.com/dpup/sierra-meshrelay/internal/relayclient"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // simNodeName seeds the fake node's pubkey. Keep it stable: the relay pinned

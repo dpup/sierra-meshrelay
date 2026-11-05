@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dpup/sierra-meshbridge/internal/bridge"
-	"github.com/dpup/sierra-meshbridge/internal/companion"
-	"github.com/dpup/sierra-meshbridge/internal/config"
-	"github.com/dpup/sierra-meshbridge/internal/connect"
-	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	"github.com/dpup/sierra-meshbridge/internal/relayclient"
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/internal/bridge"
+	"github.com/dpup/sierra-meshrelay/internal/companion"
+	"github.com/dpup/sierra-meshrelay/internal/config"
+	"github.com/dpup/sierra-meshrelay/internal/connect"
+	"github.com/dpup/sierra-meshrelay/internal/nodelink"
+	"github.com/dpup/sierra-meshrelay/internal/relayclient"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".

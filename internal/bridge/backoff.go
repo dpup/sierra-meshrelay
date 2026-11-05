@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // Backoff decides how long to wait before redialling the relay.

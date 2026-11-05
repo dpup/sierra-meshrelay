@@ -16,9 +16,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dpup/sierra-meshbridge/internal/config"
-	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/internal/config"
+	"github.com/dpup/sierra-meshrelay/internal/nodelink"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // Options configures a Bridge. Zero durations take defaults.

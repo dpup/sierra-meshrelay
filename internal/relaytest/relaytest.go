@@ -16,7 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // Timeout bounds every Expect call.

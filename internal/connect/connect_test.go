@@ -15,10 +15,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/dpup/sierra-meshbridge/internal/companion"
-	"github.com/dpup/sierra-meshbridge/internal/connect"
-	"github.com/dpup/sierra-meshbridge/internal/relayclient"
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/internal/companion"
+	"github.com/dpup/sierra-meshrelay/internal/connect"
+	"github.com/dpup/sierra-meshrelay/internal/relayclient"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // fakeRelay is a scripted client endpoint. script runs once per client
