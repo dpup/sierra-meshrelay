@@ -60,3 +60,7 @@ Live-test rules:
 | `internal/connect` | `meshbridge connect`: local TCP companion port ↔ relay lease |
 | `internal/relaytest`, `internal/fakenode` | Test doubles |
 | `e2e` | Live relay tests |
+
+## License
+
+MIT
