@@ -1,19 +1,24 @@
-// Package meshrelay is the SIERRA Mesh Relay: the meeting point between
+// Package relay is the SIERRA Mesh Relay: the meeting point between
 // MeshCore gateways at volunteers' houses and the authenticated clients that
 // talk to a node through them.
 //
 //	node <--serial/TCP--> bridge ==WSS (bridge dials out)==> relay <==WSS== client
 //
 // A bridge dials OUT to the relay, so a house needs no open port and works
-// behind CGNAT. The wire protocol is PROTOCOL.md in
-// github.com/dpup/sierra-meshrelay-protocol, whose Go types (shared with the
-// bridge) protocol.go aliases; the service requirements are
-// docs/mesh-relay-server.md. Read both before changing anything here.
+// behind CGNAT. The wire protocol is PROTOCOL.md at this repo's root, whose
+// Go types (package meshproto, shared with the bridge) protocol.go aliases;
+// the service requirements are docs/relay.md. Read both before changing
+// anything here.
+//
+// This package is a library. The deployed binary (cmd/mesh-relay) lives in
+// github.com/dpup/sierra-data, which wires it into prefab, its config and its
+// deploy handoff (passed in as Config.Gate). The e2e tests in this repo run
+// it in process against the real bridge.
 //
 // # Why a separate process
 //
-// The relay runs as its own binary (cmd/mesh-relay) with its own SQLite file,
-// and nothing in cmd/server imports this package. A relay crash must not touch
+// The relay runs as its own binary (sierra-data's cmd/mesh-relay) with its own
+// SQLite file, and nothing in the Grid's cmd/server imports this package. A relay crash must not touch
 // the hazard feeds, and vice versa. Keep it that way: do not mount this plugin
 // on the Grid's server.
 //
@@ -55,4 +60,4 @@
 // A lease holder is an interface (LeaseHolder), not a websocket, so the
 // phase-3 internal poller can hold a lease exactly like an external client,
 // at a lower Priority that a human session preempts.
-package meshrelay
+package relay

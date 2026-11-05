@@ -1,4 +1,4 @@
-package meshrelay
+package relay
 
 import (
 	"crypto/rand"
@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // Token prefixes make a leaked token recognizable (and greppable by secret
@@ -19,7 +19,7 @@ const (
 	ClientTokenPrefix = "smc_"
 )
 
-// Role is a client token's authority. See docs/mesh-relay-server.md "Roles".
+// Role is a client token's authority. See docs/relay.md "Roles".
 type Role string
 
 const (

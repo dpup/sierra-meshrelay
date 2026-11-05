@@ -1,4 +1,4 @@
-package meshrelay
+package relay
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,14 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/dpup/sierra-data/internal/config"
 )
-
-func TestMain(m *testing.M) {
-	config.RegisterPrefabNamespaces()
-	os.Exit(m.Run())
-}
 
 // bufLogger is a prefab logging.Logger over zap, writing JSON to a buffer so
 // tests can assert on what the relay logs.
@@ -914,24 +906,6 @@ func TestHealthAndRootRedirect(t *testing.T) {
 		resp.Body.Close()
 		assert.Equal(t, http.StatusFound, resp.StatusCode, p)
 		assert.Equal(t, SiteStatusPath, resp.Header.Get("Location"), p)
-	}
-}
-
-func TestConfigFrom(t *testing.T) {
-	cfg, err := ConfigFrom(config.MeshRelayConfig{Admins: []config.MeshRelayAdmin{
-		{Name: "dpup", TokenSHA256: strings.Repeat("AB", 32)},
-	}, LeaseDuration: time.Minute})
-	require.NoError(t, err)
-	assert.Equal(t, strings.Repeat("ab", 32), cfg.BootstrapAdmins["dpup"])
-	assert.Equal(t, time.Minute, cfg.LeaseDuration)
-
-	for _, bad := range []config.MeshRelayAdmin{
-		{Name: "dpup", TokenSHA256: "short"},
-		{Name: "dpup", TokenSHA256: "smc_rawtokenpastedbymistake"},
-		{Name: "Not A Slug", TokenSHA256: strings.Repeat("ab", 32)},
-	} {
-		_, err := ConfigFrom(config.MeshRelayConfig{Admins: []config.MeshRelayAdmin{bad}})
-		assert.Error(t, err, "%+v", bad)
 	}
 }
 

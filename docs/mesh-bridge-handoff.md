@@ -1,6 +1,6 @@
 # Handoff: SIERRA Mesh Bridge (`meshbridge`)
 
-*For a new agent in a new repo. Read the wire spec first: [PROTOCOL.md](https://github.com/dpup/sierra-meshrelay-protocol/blob/main/PROTOCOL.md) in `dpup/sierra-meshrelay-protocol`, shared with the relay. Where this handoff and the protocol disagree, the protocol wins.*
+*For a new agent in a new repo. Read the wire spec first: [PROTOCOL.md](../PROTOCOL.md), shared with the relay in this repo. Where this handoff and the protocol disagree, the protocol wins.*
 
 ## Where things stand
 

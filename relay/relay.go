@@ -1,4 +1,4 @@
-package meshrelay
+package relay
 
 import (
 	"context"
@@ -11,8 +11,6 @@ import (
 
 	"github.com/dpup/prefab"
 	"github.com/dpup/prefab/logging"
-
-	"github.com/dpup/sierra-data/internal/handoff"
 )
 
 // Config tunes the relay. Zero values take the defaults in withDefaults.
@@ -57,6 +55,10 @@ type Config struct {
 	// handler to return after closing them (5s). A handoff counts sessions
 	// still open past it as a failed release.
 	SessionDrainTimeout time.Duration
+	// Gate admits requests to every relay route. A deploy handoff closes it
+	// to stop admitting new work (sierra-data passes its handoff gate). Nil
+	// means always open.
+	Gate Gate
 }
 
 func (c Config) withDefaults() Config {
@@ -115,8 +117,8 @@ type Relay struct {
 	// shutdown has begun, so nothing slips in behind the close sweep.
 	stopping bool
 	// gate admits the relay's routes; closing it is how a handoff stops
-	// admitting (see internal/handoff). New gives every relay an open one.
-	gate *handoff.Gate
+	// admitting. Config.Gate, or an always-open gate.
+	gate Gate
 
 	lockout *ipLockout
 	debug   map[string]bool
@@ -207,7 +209,7 @@ func (r *Relay) Stop(ctx context.Context) error {
 }
 
 // Gate is the admission gate in front of every relay route.
-func (r *Relay) Gate() *handoff.Gate { return r.gate }
+func (r *Relay) Gate() Gate { return r.gate }
 
 func (r *Relay) runCancel() context.CancelFunc {
 	r.lifeMu.Lock()
@@ -271,7 +273,10 @@ func New(ctx context.Context, cfg Config, st *Store) *Relay {
 		auditCh: make(chan func(*Store) error, 1024),
 		lockout: newIPLockout(cfg.AuthFailLimit, cfg.AuthFailWindow, cfg.AuthLockout),
 		debug:   map[string]bool{},
-		gate:    handoff.NewGate(),
+		gate:    cfg.Gate,
+	}
+	if r.gate == nil {
+		r.gate = openGate{}
 	}
 	for _, g := range cfg.DebugPayloadGateways {
 		r.debug[g] = true

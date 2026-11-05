@@ -1,4 +1,4 @@
-package meshrelay
+package relay
 
 import (
 	"context"

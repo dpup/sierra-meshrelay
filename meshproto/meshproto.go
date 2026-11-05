@@ -1,7 +1,7 @@
 // Package meshproto holds the SIERRA Mesh Relay wire protocol v1 types and
 // constants. PROTOCOL.md, in this repo, is the spec they implement.
 //
-// The relay (dpup/sierra-data) and the bridge (dpup/sierra-meshbridge) both
+// The relay (package relay) and the bridge (cmd/meshbridge) in this repo both
 // import this package so their message shapes can't drift. It has no
 // dependencies and does no I/O, so it also suits small or embedded bridges.
 package meshproto

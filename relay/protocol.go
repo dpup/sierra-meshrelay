@@ -1,13 +1,13 @@
-package meshrelay
+package relay
 
 import (
 	"time"
 
-	meshproto "github.com/dpup/sierra-meshrelay-protocol"
+	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
 // The wire protocol's types and constants live in the shared module
-// github.com/dpup/sierra-meshrelay-protocol (spec: PROTOCOL.md there), which
+// package meshproto (spec: PROTOCOL.md at the repo root), which
 // the bridge imports too. The names below alias it so the relay code reads as
 // before.
 

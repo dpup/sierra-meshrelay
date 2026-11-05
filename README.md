@@ -1,10 +1,12 @@
-# meshbridge
+# sierra-meshrelay
 
-Connects a MeshCore companion radio to the SIERRA Mesh Relay, so authorized SIERRA clients can use the radio remotely. The bridge dials **out** to the relay over WebSocket; nothing connects in to the host's network.
+Remote access to MeshCore companion radios for SIERRA. A volunteer's radio connects to the **relay** through **meshbridge**, and authorized clients reach the radio through the relay. The bridge dials **out** over WebSocket, so nothing ever connects in to a host's network.
+
+This repo holds all three parts: the wire protocol (`PROTOCOL.md` and the Go types in `meshproto/`), the relay (`relay/`), and the bridge (`cmd/meshbridge`). A protocol change, the relay, the bridge and their end-to-end tests all land in one pull request.
 
 ## How it fits together
 
-The same binary runs at both ends, with the relay in the middle:
+The same `meshbridge` binary runs at both ends, with the relay in the middle:
 
 ```
  host site (e.g. a cabin)              cloud                         your laptop
@@ -33,12 +35,19 @@ The differences:
 
 ## Docs
 
-- [docs/mesh-bridge-handoff.md](docs/mesh-bridge-handoff.md): what we're building and why, plus the milestones.
-- [sierra-meshrelay-protocol](https://github.com/dpup/sierra-meshrelay-protocol): the wire protocol spec (`PROTOCOL.md`) and its Go types (`meshproto`). The relay imports the same module.
+- [PROTOCOL.md](PROTOCOL.md): the wire protocol. It's the canonical spec, and the Go types in `meshproto/` are tested against its examples.
+- [docs/relay.md](docs/relay.md): the relay's service spec, design decisions and deployment requirements.
+- [docs/mesh-bridge-handoff.md](docs/mesh-bridge-handoff.md): the bridge's design and milestones.
+
+### Where the relay runs
+
+`relay/` is a library. The deployed relay is `cmd/mesh-relay` in [dpup/sierra-data](https://github.com/dpup/sierra-data), which imports this module and adds sierra-data's prefab config, its deploy handoff (passed in as `relay.Config.Gate`), the Docker image and the ECS deploy. To ship a relay change, merge it here, bump `github.com/dpup/sierra-meshrelay` in sierra-data, and deploy from there.
 
 ## Status
 
-M1 is done: `meshbridge run` with a TCP (WiFi) node link, the full bridge side of the relay protocol, and the identity check. It's verified with meshcore-cli against a Heltec V3 through the production relay. The `connect` client shim (M6) is built too. Serial, pairing, the service, and the control API come in later milestones.
+Relay: phase 1 is live at `data.sierragridteam.org`. It handles bridge and client sessions, leases, pubkey pinning, the admin API and public status.
+
+Bridge: M1 is done: `meshbridge run` with a TCP (WiFi) node link, the full bridge side of the relay protocol, and the identity check. It's verified with meshcore-cli against a Heltec V3 through the production relay. The `connect` client shim (M6) is built too. Serial, pairing, the service, and the control API come in later milestones.
 
 ## Running
 
@@ -65,7 +74,7 @@ Without a radio, run `./bin/fakenode -listen 127.0.0.1:5000` and point `tcp_host
 
 | Command | What it runs | Needs |
 |---|---|---|
-| `make test` | Unit and integration tests with a fake node and a scripted relay (`internal/relaytest`) | Nothing |
+| `make test` | Every package's tests, plus `e2e/local_test.go`: the **real relay and real bridge in one process**, with a fake node and a TCP client through `connect`. It covers the full chain, a burst through the relay's throttling, pubkey pinning and accept-pubkey, relink, busy (4029), and a bridge dropping mid-lease. | Nothing |
 | `make test-live` | The real bridge plus a fake node against the **production** relay on `bridge-dev-sim`: lease, `APP_START`/`SELF_INFO`, round trips, a 300-frame burst through backpressure, renew, busy (4029), and the full chain through `connect` | `.envrc` with `RELAY`, `SIM_BRIDGE_TOKEN`, `CLIENT_TOKEN` |
 | ↳ admin checks | Relink via the admin API | `ADMIN` too; these skip without it |
 
@@ -78,15 +87,17 @@ Live-test rules:
 
 | Path | |
 |---|---|
-| `cmd/meshbridge` | The bridge CLI |
+| `PROTOCOL.md`, `meshproto/` | The wire protocol spec and its Go types |
+| `relay/` | The relay: bridge and client sessions, leases, pinning, SQLite store, admin API |
+| `cmd/meshbridge` | The bridge CLI (`run`, `connect`, `find-node`) |
 | `cmd/fakenode` | A standalone fake companion node |
 | `internal/bridge` | Node manager, relay session, reconnect backoff |
 | `internal/companion` | Companion framing and the identity check (verified against MeshCore companion-v1.18.0) |
 | `internal/nodelink` | Node link interface and TCP link |
 | `internal/relayclient` | Client side of the relay protocol |
 | `internal/connect` | `meshbridge connect`: local TCP companion port ↔ relay lease |
-| `internal/relaytest`, `internal/fakenode` | Test doubles |
-| `e2e` | Live relay tests |
+| `internal/relaytest`, `internal/fakenode` | Test doubles: a scripted relay and a fake node |
+| `e2e` | End-to-end tests: local (real relay in process) and live (production relay) |
 
 ## License
 

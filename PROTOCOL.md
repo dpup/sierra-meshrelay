@@ -1,14 +1,14 @@
 # SIERRA Mesh Relay — Wire Protocol v1
 
-*The canonical spec. The relay, the bridge, and client libraries all implement this. This repo (`dpup/sierra-meshrelay-protocol`) holds the only copy: other repos link here instead of keeping their own. Change the spec and the Go package in the same pull request.*
+*The canonical spec. The relay, the bridge, and client libraries all implement this. It lives in [dpup/sierra-meshrelay](https://github.com/dpup/sierra-meshrelay) alongside the relay, the bridge and the Go types (package `meshproto`); other repos link here instead of keeping a copy. Change the spec, the types and both implementations in the same pull request.*
 
 ## Implementations
 
 | Component | Language | Repo | Role |
 |---|---|---|---|
-| **Relay** | Go | `dpup/sierra-data` | Accepts bridges and clients, leases, pairing, admin API |
-| **meshbridge** | Go | `dpup/sierra-meshbridge` | Bridge daemon at host sites. Also `meshbridge connect`, a localhost TCP shim for TCP-only clients (official MeshCore app, meshcore-cli). |
-| **sierra-meshrelay-protocol** | Go | `dpup/sierra-meshrelay-protocol` (this repo) | This spec, plus message types, close codes, error codes and constants (package `meshproto`). Imported by both the relay and meshbridge so they can't drift. A conformance test suite is planned. |
+| **Relay** | Go | `dpup/sierra-meshrelay` (`relay/`), deployed by `dpup/sierra-data` | Accepts bridges and clients, leases, pairing, admin API |
+| **meshbridge** | Go | `dpup/sierra-meshrelay` (`cmd/meshbridge`) | Bridge daemon at host sites. Also `meshbridge connect`, a localhost TCP shim for TCP-only clients (official MeshCore app, meshcore-cli). |
+| **meshproto** | Go | `dpup/sierra-meshrelay` (`meshproto/`) | Message types, close codes, error codes and constants. Used by both the relay and meshbridge, and tested against this spec's examples so they can't drift. |
 | **meshcore-ts relay transport** | TypeScript | `dpup/meshcore-ts` | `MeshCoreClient.relay(…)`: a native client of this protocol, so any meshcore-ts app can use a gateway with no shim |
 | **meshcore-mcp** | TypeScript | `dpup/meshcore-mcp` | Uses the meshcore-ts relay transport, so Elmer and other MCP clients can work any gateway remotely |
 | **meshcore-sim** | TypeScript | `@dpup/meshcore-sim` | Simulated companion node for testing bridges and clients without hardware |
@@ -26,7 +26,7 @@ Why this split:
 | Passphrase invites | Not yet built | Not started | n/a |
 | Client tickets (browser auth) | Not yet built | n/a | Not started |
 | Client relay transport | n/a | `connect` shim done | Not started |
-| Shared Go module (`sierra-meshrelay-protocol`) | Migrating | Uses it | n/a |
+| Shared Go types (`meshproto`) | Uses them | Uses them | n/a |
 
 Update this table as things land.
 
@@ -432,7 +432,7 @@ MESHCORE_RELAY_TOKEN=smc_…
 
 ## Testing
 
-- **The shared conformance suite** will live in the `sierra-meshrelay-protocol` Go module (not built yet). The relay runs the server half against a scripted bridge and client. meshbridge runs the bridge half against a scripted relay.
+- **End-to-end tests** (`e2e/` in `dpup/sierra-meshrelay`) run the real relay and the real bridge in one process, with a fake node and a real client. Each side also has its own tests: the relay against a scripted bridge and client, the bridge against a scripted relay.
 - **meshcore-sim** is the reference fake node. meshbridge's tests run it as a TCP companion (if it can't listen on TCP yet, that's a small addition to make there). This tests the bridge against an independent implementation, not one written alongside it.
 - **End-to-end:** meshcore-sim → meshbridge → relay → meshcore-ts relay transport. A meshcore-ts client should get identical results whether it connects to meshcore-sim over TCP directly or through the relay. That's the main end-to-end test.
 
