@@ -2,9 +2,36 @@
 
 Connects a MeshCore companion radio to the SIERRA Mesh Relay, so authorized SIERRA clients can use the radio remotely. The bridge dials **out** to the relay over WebSocket; nothing connects in to the host's network.
 
+## How it fits together
+
+The same binary runs at both ends, with the relay in the middle:
+
 ```
- node <--TCP/serial--> meshbridge ==WSS (dials out)==> relay <==WSS== client
+ host site (e.g. a cabin)              cloud                         your laptop
+ ┌──────────────────────────┐                                   ┌────────────────────────────┐
+ │ node ◄─TCP:5000/USB─┐    │                                   │   ┌─► meshbridge connect     │
+ │                     │    │       data.sierragridteam.org     │   │   (127.0.0.1:5000)       │
+ │   meshbridge run ───┘    │ ══WSS out══►  relay  ◄══WSS out══ │   │        ▲                 │
+ │   (smb_ bridge token)    │                                   │   │   meshcore-cli -t 127…   │
+ └──────────────────────────┘                                   └────────────────────────────┘
 ```
+
+- **`meshbridge run`** runs at the host site, on any always-on computer that can reach the node. It holds the node's single companion connection and dials out to the relay with the gateway's bridge token (`smb_…`).
+- **`meshbridge connect <gateway>`** runs on your machine. It makes the remote node look like a local radio on `127.0.0.1:5000` for meshcore-cli and other TCP companion apps. It uses your client token (`smc_…`) and holds a lease only while an app is connected.
+- **The relay** authenticates both sides, pins each gateway to its node's pubkey, and gives one client at a time a lease on a gateway. It forwards frames without reading them.
+
+Apps built on meshcore-ts will be able to talk to the relay directly through a planned relay transport, with no `connect` shim.
+
+### Compared to Tailscale
+
+The shape is similar. Both ends dial out to a service in the cloud, so neither side opens a port, changes its router, or needs a public IP, and it works behind CGNAT. `connect` plays the role of reaching a device on your tailnet as if it were local.
+
+The differences:
+- **Every frame goes through the relay.** Tailscale tries to set up a direct WireGuard connection between peers and only falls back to its DERP relays. Here, all traffic goes through the relay, like DERP-only mode. MeshCore traffic is a handful of small frames per second, so the extra hop doesn't matter, and the relay sits where access control and auditing belong.
+- **Access is to one device's companion session, not a network.** A client gets an exclusive, time-limited lease on one gateway's node, not IP access to the host's LAN. The bridge only ever talks to the node.
+- **Trust is anchored in the node.** Tailscale trusts device keys. Here, the relay pins each gateway to its node's MeshCore pubkey, so a swapped or reflashed radio is blocked until an admin accepts its key.
+
+## Docs
 
 - [docs/mesh-bridge-handoff.md](docs/mesh-bridge-handoff.md): what we're building and why, plus the milestones.
 - [sierra-meshrelay-protocol](https://github.com/dpup/sierra-meshrelay-protocol): the wire protocol spec (`PROTOCOL.md`) and its Go types (`meshproto`). The relay imports the same module.
