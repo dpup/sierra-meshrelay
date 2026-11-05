@@ -16,9 +16,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/dpup/prefab"
@@ -64,11 +62,6 @@ func main() {
 		PublicBaseURL:   base,
 	}, st)
 	server := prefab.New(prefab.WithContext(ctx), prefab.WithHost(host), prefab.WithPort(port), prefab.WithPlugin(r))
-	go func() {
-		if err := server.Start(); err != nil {
-			fatal("%v", err)
-		}
-	}()
 
 	ws := "ws://" + net.JoinHostPort(host, portStr) + relay.PathPrefix
 	api := base + relay.PathPrefix + "/api"
@@ -90,10 +83,11 @@ func main() {
 	}
 	fmt.Printf("Pairing: meshbridge setup -relay %s   (approve with POST %s/pairings/<code>/approve)\n\n", ws, api)
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
-	_ = server.Shutdown()
+	// Start blocks until SIGINT or SIGTERM, which prefab handles itself
+	// (calling Shutdown here too would race it and crash).
+	if err := server.Start(); err != nil {
+		fatal("%v", err)
+	}
 }
 
 // seed creates a gateway and an operator client directly in the store.
