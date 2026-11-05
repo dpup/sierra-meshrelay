@@ -8,18 +8,22 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/dpup/sierra-meshbridge/internal/bridge"
 	"github.com/dpup/sierra-meshbridge/internal/companion"
 	"github.com/dpup/sierra-meshbridge/internal/config"
+	"github.com/dpup/sierra-meshbridge/internal/connect"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
 	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	"github.com/dpup/sierra-meshbridge/internal/relayclient"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".
@@ -30,6 +34,7 @@ const usage = `meshbridge connects a MeshCore companion node to the SIERRA Mesh 
 Usage:
   meshbridge run [-config path]   Run the bridge in the foreground
   meshbridge find-node -host addr Connect to a TCP node and print its identity
+  meshbridge connect <gateway>    Use a remote gateway as a local TCP companion port
   meshbridge version              Print version and build info
 `
 
@@ -42,6 +47,8 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		err = cmdRun(os.Args[2:])
+	case "connect":
+		err = cmdConnect(os.Args[2:])
 	case "find-node":
 		err = cmdFindNode(os.Args[2:])
 	case "version", "-version", "--version":
@@ -150,4 +157,70 @@ func cmdFindNode(args []string) error {
 	fmt.Printf("Found: %s\n  link    %s %s\n  pubkey  %s\n  model   %s\n  fw      %s\n",
 		id.Name, link.Kind(), link.Detail(), id.Pubkey, id.Model, id.FW)
 	return nil
+}
+
+// clientTokenEnv supplies the client token without putting it in shell history.
+const clientTokenEnv = "MESHBRIDGE_CLIENT_TOKEN"
+
+func cmdConnect(args []string) error {
+	fs := flag.NewFlagSet("connect", flag.ExitOnError)
+	token := fs.String("token", "", "client token (smc_…); default $"+clientTokenEnv)
+	listen := fs.String("listen", "127.0.0.1:5000", "local address for companion apps")
+	relay := fs.String("relay", config.DefaultRelay, "relay base URL")
+	preempt := fs.Bool("preempt", false, "take the gateway from its current user (admins only)")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: meshbridge connect <gateway> [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	// Accept the gateway before or after the flags.
+	var gateway string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		gateway, args = args[0], args[1:]
+	}
+	_ = fs.Parse(args)
+	if gateway == "" && fs.NArg() > 0 {
+		gateway = fs.Arg(0)
+	}
+	if gateway == "" {
+		fs.Usage()
+		os.Exit(2)
+	}
+	if *token == "" {
+		*token = os.Getenv(clientTokenEnv)
+	}
+	if *token == "" {
+		return fmt.Errorf("a client token is required (-token or $%s)", clientTokenEnv)
+	}
+	host, _, err := net.SplitHostPort(*listen)
+	if err != nil {
+		return fmt.Errorf("-listen: %w", err)
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		fmt.Fprintf(os.Stderr, "WARNING: listening on %s. Anyone who can reach this address can use %s with YOUR token: companion apps have no authentication.\n", *listen, gateway)
+	}
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	say := func(format string, a ...any) {
+		fmt.Printf("%s  %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, a...))
+	}
+	say("Listening on %s for %s. Point your MeshCore app or meshcore-cli at it (e.g. meshcore-cli -t %s -p %s).",
+		ln.Addr(), gateway, host, portOf(ln.Addr()))
+	shim := connect.New(connect.Options{
+		Gateway: gateway,
+		Say:     say,
+		Dial: func(ctx context.Context) (*relayclient.Conn, error) {
+			return relayclient.Dial(ctx, *relay, gateway, *token, *preempt)
+		},
+	})
+	return shim.Serve(ctx, ln)
+}
+
+func portOf(a net.Addr) string {
+	_, p, _ := net.SplitHostPort(a.String())
+	return p
 }

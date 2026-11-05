@@ -25,7 +25,7 @@ Why this split:
 | Pairing, `paused`, leave, diagnostics | Not yet built | Not started | n/a |
 | Passphrase invites | Not yet built | Not started | n/a |
 | Client tickets (browser auth) | Not yet built | n/a | Not started |
-| Client relay transport | n/a | `connect` shim not started | Not started |
+| Client relay transport | n/a | `connect` shim done | Not started |
 | Shared Go module (`sierra-mesh-protocol`) | To extract from relay | Not started | n/a |
 
 Update this table as things land.

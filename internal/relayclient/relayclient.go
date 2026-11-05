@@ -28,6 +28,16 @@ func (e *RefusedError) Error() string {
 	return fmt.Sprintf("relay refused the lease: %s (close %d)", e.Code, e.CloseCode)
 }
 
+// HTTPError means the relay refused the upgrade (401 bad token, 403
+// forbidden, 404 unknown gateway, 429 locked out, ...).
+type HTTPError struct {
+	Status int
+	Err    error
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("relay answered HTTP %d: %v", e.Status, e.Err) }
+func (e *HTTPError) Unwrap() error { return e.Err }
+
 // Conn is a client session holding a lease.
 type Conn struct {
 	ws    *websocket.Conn
@@ -58,8 +68,8 @@ func Dial(ctx context.Context, base, gateway, token string, preempt bool) (*Conn
 		resp.Body.Close()
 	}
 	if err != nil {
-		if resp != nil {
-			return nil, fmt.Errorf("dial: HTTP %d: %w", resp.StatusCode, err)
+		if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
+			return nil, &HTTPError{Status: resp.StatusCode, Err: err}
 		}
 		return nil, fmt.Errorf("dial: %w", err)
 	}

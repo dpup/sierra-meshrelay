@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/dpup/sierra-meshbridge/internal/bridge"
 	"github.com/dpup/sierra-meshbridge/internal/companion"
 	"github.com/dpup/sierra-meshbridge/internal/config"
+	"github.com/dpup/sierra-meshbridge/internal/connect"
 	"github.com/dpup/sierra-meshbridge/internal/fakenode"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
 	"github.com/dpup/sierra-meshbridge/internal/protocol"
@@ -340,4 +342,50 @@ type testWriter struct{ t *testing.T }
 func (w testWriter) Write(p []byte) (int, error) {
 	w.t.Log(strings.TrimRight(string(p), "\n"))
 	return len(p), nil
+}
+
+// TestLiveConnect runs the whole chain: fake node → bridge → relay → connect
+// shim → a TCP companion client, the path meshcore-cli takes.
+func TestLiveConnect(t *testing.T) {
+	e := liveEnv(t)
+	node, _ := runBridge(t, e)
+	e.waitGateway(t, "gateway ready", func(d gatewayDetail) bool {
+		return d.Online && d.Node != nil && d.Node.State == protocol.NodeConnected && d.Lease == nil
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shim := connect.New(connect.Options{
+		Gateway: e.gateway,
+		Say:     func(f string, a ...any) { t.Logf("connect: "+f, a...) },
+		Dial: func(ctx context.Context) (*relayclient.Conn, error) {
+			return relayclient.Dial(ctx, e.wsBase, e.gateway, e.clientToken, false)
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan struct{})
+	go func() { defer close(served); shim.Serve(ctx, ln) }()
+	defer func() { cancel(); <-served }()
+
+	for session := range 2 { // a second session proves the lease was released
+		c, err := net.Dial("tcp", ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := companion.NewReader(c, companion.HeaderFromNode, protocol.MaxFrameBytes)
+		_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+		if _, err := c.Write(companion.Encode(companion.HeaderToNode, companion.AppStartFrame())); err != nil {
+			t.Fatal(err)
+		}
+		f, err := r.ReadFrame()
+		if err != nil {
+			t.Fatalf("session %d: %v", session, err)
+		}
+		if pk, _, err := companion.ParseSelfInfo(f); err != nil || pk != node.PubkeyHex() {
+			t.Fatalf("session %d: SELF_INFO %s %v", session, pk, err)
+		}
+		c.Close()
+	}
 }
