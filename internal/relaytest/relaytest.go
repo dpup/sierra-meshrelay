@@ -16,7 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // Timeout bounds every Expect call.
@@ -84,33 +84,33 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad token", http.StatusUnauthorized)
 		return
 	}
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{protocol.BridgeSubprotocol}})
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{meshproto.BridgeSubprotocol}})
 	if err != nil {
 		return
 	}
-	if conn.Subprotocol() != protocol.BridgeSubprotocol {
-		conn.Close(websocket.StatusCode(protocol.CloseProtocolError), "subprotocol")
+	if conn.Subprotocol() != meshproto.BridgeSubprotocol {
+		conn.Close(websocket.StatusCode(meshproto.CloseProtocolError), "subprotocol")
 		return
 	}
-	conn.SetReadLimit(protocol.MaxControlBytes)
+	conn.SetReadLimit(meshproto.MaxControlBytes)
 	ctx := r.Context()
 	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	typ, data, err := conn.Read(hctx)
 	cancel()
-	var hello protocol.Hello
-	if err != nil || typ != websocket.MessageText || json.Unmarshal(data, &hello) != nil || hello.Type != protocol.TypeHello {
-		conn.Close(websocket.StatusCode(protocol.CloseProtocolError), "hello required")
+	var hello meshproto.Hello
+	if err != nil || typ != websocket.MessageText || json.Unmarshal(data, &hello) != nil || hello.Type != meshproto.TypeHello {
+		conn.Close(websocket.StatusCode(meshproto.CloseProtocolError), "hello required")
 		return
 	}
 	if hello.Gateway != r.PathValue("gateway") {
-		conn.Close(websocket.StatusCode(protocol.CloseGatewayMismatch), "gateway mismatch")
+		conn.Close(websocket.StatusCode(meshproto.CloseGatewayMismatch), "gateway mismatch")
 		return
 	}
 	sess := &Session{
 		Conn: conn, Hello: hello,
 		control: make(chan json.RawMessage, 256), frames: make(chan []byte, 4096), closed: make(chan error, 1),
 	}
-	_ = sess.Send(protocol.Welcome{Type: protocol.TypeWelcome, Session: fmt.Sprintf("s_%d", s.dials.Load()),
+	_ = sess.Send(meshproto.Welcome{Type: meshproto.TypeWelcome, Session: fmt.Sprintf("s_%d", s.dials.Load()),
 		PingIntervalS: s.PingIntervalS, ServerTime: time.Now().UTC().Format(time.RFC3339)})
 	s.sessions <- sess
 	for {
@@ -133,7 +133,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 // Session is one connected bridge.
 type Session struct {
 	Conn    *websocket.Conn
-	Hello   protocol.Hello
+	Hello   meshproto.Hello
 	control chan json.RawMessage
 	frames  chan []byte
 	closed  chan error
@@ -161,7 +161,7 @@ func (s *Session) SendFrame(f []byte) error {
 
 // Attach tells the bridge a client took lease id.
 func (s *Session) Attach(id string) error {
-	return s.Send(protocol.Attach{Type: protocol.TypeAttach, Lease: id, Client: "test-client"})
+	return s.Send(meshproto.Attach{Type: meshproto.TypeAttach, Lease: id, Client: "test-client"})
 }
 
 // Close closes the session with code.
@@ -176,7 +176,7 @@ func (s *Session) Expect(typ string, out any) error {
 	for {
 		select {
 		case m := <-s.control:
-			if protocol.TypeOf(m) != typ {
+			if meshproto.TypeOf(m) != typ {
 				continue
 			}
 			if out != nil {
@@ -194,7 +194,7 @@ func (s *Session) Expect(typ string, out any) error {
 
 // ExpectNode waits for the bridge to report node state (in hello or a later
 // node_status) and returns the node.
-func (s *Session) ExpectNode(state string) (protocol.Node, error) {
+func (s *Session) ExpectNode(state string) (meshproto.Node, error) {
 	if !s.helloSeen {
 		s.helloSeen = true
 		if s.Hello.Node.State == state {
@@ -203,15 +203,15 @@ func (s *Session) ExpectNode(state string) (protocol.Node, error) {
 	}
 	deadline := time.Now().Add(Timeout)
 	for time.Now().Before(deadline) {
-		var m protocol.NodeStatus
-		if err := s.Expect(protocol.TypeNodeStatus, &m); err != nil {
+		var m meshproto.NodeStatus
+		if err := s.Expect(meshproto.TypeNodeStatus, &m); err != nil {
 			return m.Node, err
 		}
 		if m.State == state {
 			return m.Node, nil
 		}
 	}
-	return protocol.Node{}, fmt.Errorf("relaytest: node never reached %q", state)
+	return meshproto.Node{}, fmt.Errorf("relaytest: node never reached %q", state)
 }
 
 // ExpectFrame waits for a binary frame from the bridge.

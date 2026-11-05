@@ -11,7 +11,7 @@ import (
 
 	"github.com/dpup/sierra-meshbridge/internal/companion"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // runNode keeps a verified link to the node open for as long as ctx lives.
@@ -114,9 +114,9 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 		b.nodeDown("identity check failed", err)
 		return linkFailedIdentify
 	}
-	node := protocol.Node{State: protocol.NodeConnected, Pubkey: id.Pubkey, Name: id.Name, FW: id.FW, Model: id.Model}
+	node := meshproto.Node{State: meshproto.NodeConnected, Pubkey: id.Pubkey, Name: id.Name, FW: id.FW, Model: id.Model}
 	if want := b.opts.Config.Node.ExpectedPubkey; want != "" && id.Pubkey != want {
-		node.State = protocol.NodeMismatch
+		node.State = meshproto.NodeMismatch
 		if prev, _, _, _ := b.nodeSnapshot(); prev != node {
 			b.log.Warn("this isn't the node SIERRA expects; contact your SIERRA contact",
 				"pubkey", id.Pubkey, "expected", want, "name", id.Name)
@@ -136,7 +136,7 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 		return linkServed // shutting down
 	}
 	if relinked.Load() {
-		b.setNode(protocol.Node{State: protocol.NodeDisconnected, Error: "relink"}, nil)
+		b.setNode(meshproto.Node{State: meshproto.NodeDisconnected, Error: "relink"}, nil)
 		return linkRelinked
 	}
 	b.nodeDown(nodeErrorText(err), err)
@@ -144,11 +144,11 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 }
 
 func (b *Bridge) nodeDown(reason string, err error) {
-	n := protocol.Node{State: protocol.NodeDisconnected, Error: reason}
+	n := meshproto.Node{State: meshproto.NodeDisconnected, Error: reason}
 	prev, _, _, _ := b.nodeSnapshot()
 	if prev.State != n.State || prev.Error != n.Error {
 		lvl := slog.LevelWarn
-		if prev.State == protocol.NodeDisconnected {
+		if prev.State == meshproto.NodeDisconnected {
 			lvl = slog.LevelInfo
 		}
 		b.log.Log(context.Background(), lvl, "node unavailable", "reason", reason, "error", err)

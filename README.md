@@ -7,7 +7,7 @@ Connects a MeshCore companion radio to the SIERRA Mesh Relay, so authorized SIER
 ```
 
 - [docs/mesh-bridge-handoff.md](docs/mesh-bridge-handoff.md): what we're building and why, plus the milestones.
-- [docs/mesh-relay-wireprotocol.md](docs/mesh-relay-wireprotocol.md): the wire protocol. It's shared with the relay (`dpup/sierra-data`), so change it in both places.
+- [sierra-meshrelay-protocol](https://github.com/dpup/sierra-meshrelay-protocol): the wire protocol spec (`PROTOCOL.md`) and its Go types (`meshproto`). The relay imports the same module.
 
 ## Status
 
@@ -56,7 +56,6 @@ Live-test rules:
 | `internal/bridge` | Node manager, relay session, reconnect backoff |
 | `internal/companion` | Companion framing and the identity check (verified against MeshCore companion-v1.18.0) |
 | `internal/nodelink` | Node link interface and TCP link |
-| `internal/protocol` | Wire-protocol types and constants, kept dependency-free so they can move into a shared module |
 | `internal/relayclient` | Client side of the relay protocol |
 | `internal/connect` | `meshbridge connect`: local TCP companion port ↔ relay lease |
 | `internal/relaytest`, `internal/fakenode` | Test doubles |

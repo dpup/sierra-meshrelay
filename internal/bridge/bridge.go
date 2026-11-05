@@ -18,7 +18,7 @@ import (
 
 	"github.com/dpup/sierra-meshbridge/internal/config"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // Options configures a Bridge. Zero durations take defaults.
@@ -67,7 +67,7 @@ func (o *Options) defaults() {
 		o.Version = "dev"
 	}
 	if o.LinkKind == "" {
-		o.LinkKind = protocol.LinkTCP
+		o.LinkKind = meshproto.LinkTCP
 	}
 }
 
@@ -78,7 +78,7 @@ type Bridge struct {
 	started time.Time
 
 	mu          sync.Mutex
-	node        protocol.Node
+	node        meshproto.Node
 	linkKind    string
 	linkDetail  string
 	nodeVer     uint64
@@ -102,7 +102,7 @@ func New(opts Options) *Bridge {
 	return &Bridge{
 		opts:        opts,
 		log:         opts.Log,
-		node:        protocol.Node{State: protocol.NodeDisconnected},
+		node:        meshproto.Node{State: meshproto.NodeDisconnected},
 		linkKind:    opts.LinkKind,
 		linkDetail:  opts.LinkDetail,
 		nodeChanged: make(chan struct{}),
@@ -131,7 +131,7 @@ func (b *Bridge) Relink() {
 
 // Status is a snapshot of the bridge's state.
 type Status struct {
-	Node            protocol.Node
+	Node            meshproto.Node
 	LinkKind        string
 	LinkDetail      string
 	RelayConnected  bool
@@ -161,7 +161,7 @@ func (b *Bridge) Status() Status {
 }
 
 // setNode records a node change and wakes anyone waiting on it.
-func (b *Bridge) setNode(n protocol.Node, link nodelink.Link) {
+func (b *Bridge) setNode(n meshproto.Node, link nodelink.Link) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.link = link
@@ -179,10 +179,10 @@ func (b *Bridge) setNode(n protocol.Node, link nodelink.Link) {
 
 // nodeSnapshot returns the node state, its version and a channel closed on the
 // next change.
-func (b *Bridge) nodeSnapshot() (protocol.Node, protocol.Link, uint64, <-chan struct{}) {
+func (b *Bridge) nodeSnapshot() (meshproto.Node, meshproto.Link, uint64, <-chan struct{}) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.node, protocol.Link{Kind: b.linkKind, Detail: b.linkDetail}, b.nodeVer, b.nodeChanged
+	return b.node, meshproto.Link{Kind: b.linkKind, Detail: b.linkDetail}, b.nodeVer, b.nodeChanged
 }
 
 func (b *Bridge) currentLink() nodelink.Link {
@@ -211,8 +211,8 @@ func (b *Bridge) clearSession(s *session) {
 	b.mu.Unlock()
 }
 
-func (b *Bridge) agent() protocol.Agent {
-	return protocol.Agent{Name: "meshbridge", Version: b.opts.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
+func (b *Bridge) agent() meshproto.Agent {
+	return meshproto.Agent{Name: "meshbridge", Version: b.opts.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
 }
 
 // sleep waits d or until ctx ends, reporting whether the full wait happened.

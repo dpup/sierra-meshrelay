@@ -17,8 +17,8 @@ import (
 
 	"github.com/dpup/sierra-meshbridge/internal/companion"
 	"github.com/dpup/sierra-meshbridge/internal/connect"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
 	"github.com/dpup/sierra-meshbridge/internal/relayclient"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // fakeRelay is a scripted client endpoint. script runs once per client
@@ -40,7 +40,7 @@ func newFakeRelay(t *testing.T, script func(ctx context.Context, c *websocket.Co
 			http.Error(w, "no", http.StatusUnauthorized)
 			return
 		}
-		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{protocol.ClientSubprotocol}})
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{meshproto.ClientSubprotocol}})
 		if err != nil {
 			return
 		}
@@ -58,10 +58,10 @@ func sendJSON(ctx context.Context, c *websocket.Conn, v any) {
 	_ = c.Write(ctx, websocket.MessageText, b)
 }
 
-func lease(id string) protocol.Lease {
-	return protocol.Lease{Type: protocol.TypeLease, Lease: id, Gateway: "gw",
+func lease(id string) meshproto.Lease {
+	return meshproto.Lease{Type: meshproto.TypeLease, Lease: id, Gateway: "gw",
 		ExpiresAt: time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339),
-		Node:      &protocol.Node{State: protocol.NodeConnected, Name: "N"}}
+		Node:      &meshproto.Node{State: meshproto.NodeConnected, Name: "N"}}
 }
 
 // echoScript grants a lease and echoes frames with a 0x80 prefix.
@@ -133,7 +133,7 @@ func dialLocal(t *testing.T, addr string) (net.Conn, *companion.Reader) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.Close() })
-	return c, companion.NewReader(c, companion.HeaderFromNode, protocol.MaxFrameBytes)
+	return c, companion.NewReader(c, companion.HeaderFromNode, meshproto.MaxFrameBytes)
 }
 
 func TestTranslatesFraming(t *testing.T) {
@@ -195,22 +195,22 @@ func TestRefusals(t *testing.T) {
 		want   string
 	}{
 		{"busy", func(ctx context.Context, c *websocket.Conn) {
-			sendJSON(ctx, c, protocol.Error{Type: protocol.TypeError, Code: protocol.ErrBusy})
-			c.Close(protocol.CloseBusy, "busy")
+			sendJSON(ctx, c, meshproto.Error{Type: meshproto.TypeError, Code: meshproto.ErrBusy})
+			c.Close(meshproto.CloseBusy, "busy")
 		}, "Someone else is using this gateway."},
 		{"offline", func(ctx context.Context, c *websocket.Conn) {
-			sendJSON(ctx, c, protocol.GatewayStatus{Type: protocol.TypeGatewayStatus, Bridge: "offline"})
-			sendJSON(ctx, c, protocol.Error{Type: protocol.TypeError, Code: protocol.ErrGatewayOffline})
+			sendJSON(ctx, c, meshproto.GatewayStatus{Type: meshproto.TypeGatewayStatus, Bridge: "offline"})
+			sendJSON(ctx, c, meshproto.Error{Type: meshproto.TypeError, Code: meshproto.ErrGatewayOffline})
 			c.Close(websocket.StatusNormalClosure, "")
 		}, "Gateway is offline."},
 		{"paused", func(ctx context.Context, c *websocket.Conn) {
-			sendJSON(ctx, c, protocol.GatewayStatus{Type: protocol.TypeGatewayStatus, Bridge: "online",
-				Node: &protocol.Node{State: protocol.NodePaused, Until: "2026-11-04T01:30:00Z"}})
-			sendJSON(ctx, c, protocol.Error{Type: protocol.TypeError, Code: "node_paused"})
+			sendJSON(ctx, c, meshproto.GatewayStatus{Type: meshproto.TypeGatewayStatus, Bridge: "online",
+				Node: &meshproto.Node{State: meshproto.NodePaused, Until: "2026-11-04T01:30:00Z"}})
+			sendJSON(ctx, c, meshproto.Error{Type: meshproto.TypeError, Code: "node_paused"})
 			c.Close(websocket.StatusNormalClosure, "")
 		}, "The host has paused sharing until"},
 		{"mismatch", func(ctx context.Context, c *websocket.Conn) {
-			sendJSON(ctx, c, protocol.Error{Type: protocol.TypeError, Code: protocol.ErrPubkeyMismatch, Message: "SECRET"})
+			sendJSON(ctx, c, meshproto.Error{Type: meshproto.TypeError, Code: meshproto.ErrPubkeyMismatch, Message: "SECRET"})
 			c.Close(websocket.StatusNormalClosure, "")
 		}, "Gateway's node needs checking by a SIERRA admin."},
 	}
@@ -240,16 +240,16 @@ func TestAutoRenewAndEnding(t *testing.T) {
 	renewed := make(chan struct{}, 1)
 	f := newFakeRelay(t, func(ctx context.Context, c *websocket.Conn) {
 		sendJSON(ctx, c, lease("l_1"))
-		sendJSON(ctx, c, protocol.LeaseEnding{Type: protocol.TypeLeaseEnding, Lease: "l_1", InS: 60, Reason: "expiry"})
+		sendJSON(ctx, c, meshproto.LeaseEnding{Type: meshproto.TypeLeaseEnding, Lease: "l_1", InS: 60, Reason: "expiry"})
 		for {
 			typ, data, err := c.Read(ctx)
 			if err != nil {
 				return
 			}
-			if typ == websocket.MessageText && protocol.TypeOf(data) == protocol.TypeRenew {
+			if typ == websocket.MessageText && meshproto.TypeOf(data) == meshproto.TypeRenew {
 				renewed <- struct{}{}
 				sendJSON(ctx, c, lease("l_1"))
-				sendJSON(ctx, c, protocol.LeaseEnding{Type: protocol.TypeLeaseEnding, Lease: "l_1", InS: 0, Reason: "preempted"})
+				sendJSON(ctx, c, meshproto.LeaseEnding{Type: meshproto.TypeLeaseEnding, Lease: "l_1", InS: 0, Reason: "preempted"})
 				c.Close(websocket.StatusNormalClosure, "")
 				return
 			}

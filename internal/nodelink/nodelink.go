@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/dpup/sierra-meshbridge/internal/companion"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // Link is an open connection to a node. ReadFrame and WriteFrame may be called
@@ -25,7 +25,7 @@ type Link interface {
 	WriteFrame(payload []byte) error
 	// Close closes the link and unblocks any pending ReadFrame.
 	Close() error
-	// Kind is protocol.LinkTCP or protocol.LinkSerial.
+	// Kind is meshproto.LinkTCP or meshproto.LinkSerial.
 	Kind() string
 	// Detail is informational: a port name or host:port.
 	Detail() string
@@ -61,7 +61,7 @@ func (t TCP) Open(ctx context.Context) (Link, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewStream(c, protocol.LinkTCP, t.addr()), nil
+	return NewStream(c, meshproto.LinkTCP, t.addr()), nil
 }
 
 // Stream adapts any byte stream (TCP socket, serial port, pipe) to a Link.
@@ -77,7 +77,7 @@ type Stream struct {
 func NewStream(rwc io.ReadWriteCloser, kind, detail string) *Stream {
 	return &Stream{
 		rwc:    rwc,
-		r:      companion.NewReader(rwc, companion.HeaderFromNode, protocol.MaxFrameBytes),
+		r:      companion.NewReader(rwc, companion.HeaderFromNode, meshproto.MaxFrameBytes),
 		kind:   kind,
 		detail: detail,
 	}
@@ -86,8 +86,8 @@ func NewStream(rwc io.ReadWriteCloser, kind, detail string) *Stream {
 func (s *Stream) ReadFrame() ([]byte, error) { return s.r.ReadFrame() }
 
 func (s *Stream) WriteFrame(p []byte) error {
-	if len(p) > protocol.MaxFrameBytes {
-		return fmt.Errorf("nodelink: frame of %d bytes exceeds %d", len(p), protocol.MaxFrameBytes)
+	if len(p) > meshproto.MaxFrameBytes {
+		return fmt.Errorf("nodelink: frame of %d bytes exceeds %d", len(p), meshproto.MaxFrameBytes)
 	}
 	s.wmu.Lock()
 	defer s.wmu.Unlock()

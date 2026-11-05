@@ -34,8 +34,8 @@ import (
 	"github.com/dpup/sierra-meshbridge/internal/connect"
 	"github.com/dpup/sierra-meshbridge/internal/fakenode"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
 	"github.com/dpup/sierra-meshbridge/internal/relayclient"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // simNodeName seeds the fake node's pubkey. Keep it stable: the relay pinned
@@ -78,10 +78,10 @@ func liveEnv(t *testing.T) env {
 }
 
 type gatewayDetail struct {
-	Online       bool           `json:"online"`
-	Node         *protocol.Node `json:"node"`
-	Link         *protocol.Link `json:"link"`
-	Agent        *protocol.Agent
+	Online       bool            `json:"online"`
+	Node         *meshproto.Node `json:"node"`
+	Link         *meshproto.Link `json:"link"`
+	Agent        *meshproto.Agent
 	PubkeyStatus string `json:"pubkey_status"`
 	PinnedPubkey string `json:"pinned_pubkey"`
 	Lease        *struct {
@@ -167,7 +167,7 @@ func TestLiveBridge(t *testing.T) {
 	node, b := runBridge(t, e)
 
 	d := e.waitGateway(t, "gateway online with node connected", func(d gatewayDetail) bool {
-		return d.Online && d.Node != nil && d.Node.State == protocol.NodeConnected
+		return d.Online && d.Node != nil && d.Node.State == meshproto.NodeConnected
 	})
 	if d.Node.Pubkey != node.PubkeyHex() || d.Node.Name != simNodeName {
 		t.Fatalf("relay sees node %+v", d.Node)
@@ -234,8 +234,8 @@ func TestLiveBridge(t *testing.T) {
 		if err := c.Renew(ctx); err != nil {
 			t.Fatal(err)
 		}
-		var l protocol.Lease
-		nextControl(t, c, protocol.TypeLease, &l)
+		var l meshproto.Lease
+		nextControl(t, c, meshproto.TypeLease, &l)
 		if l.Lease != c.Lease.Lease {
 			t.Fatalf("renewed %q, want %q", l.Lease, c.Lease.Lease)
 		}
@@ -256,7 +256,7 @@ func TestLiveBridge(t *testing.T) {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		waitStatus(t, b, "node reconnected", func(st bridge.Status) bool { return st.Node.State == protocol.NodeConnected })
+		waitStatus(t, b, "node reconnected", func(st bridge.Status) bool { return st.Node.State == meshproto.NodeConnected })
 	})
 
 	c.Close()
@@ -267,7 +267,7 @@ func TestLiveBusy(t *testing.T) {
 	e := liveEnv(t)
 	_, b := runBridge(t, e)
 	e.waitGateway(t, "gateway ready", func(d gatewayDetail) bool {
-		return d.Online && d.Node != nil && d.Node.State == protocol.NodeConnected && d.Lease == nil
+		return d.Online && d.Node != nil && d.Node.State == meshproto.NodeConnected && d.Lease == nil
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -278,7 +278,7 @@ func TestLiveBusy(t *testing.T) {
 	waitStatus(t, b, "attach", func(st bridge.Status) bool { return st.Attached })
 	_, err = relayclient.Dial(ctx, e.wsBase, e.gateway, e.clientToken, false)
 	var re *relayclient.RefusedError
-	if !asRefused(err, &re) || re.Code != protocol.ErrBusy || re.CloseCode != protocol.CloseBusy {
+	if !asRefused(err, &re) || re.Code != meshproto.ErrBusy || re.CloseCode != meshproto.CloseBusy {
 		t.Fatalf("second client: %v, want busy/4029", err)
 	}
 	c.Close()
@@ -324,7 +324,7 @@ func nextControl(t *testing.T, c *relayclient.Conn, typ string, out any) {
 			if !ok {
 				t.Fatalf("session ended: %v", c.Err())
 			}
-			if protocol.TypeOf(m) == typ {
+			if meshproto.TypeOf(m) == typ {
 				if err := json.Unmarshal(m, out); err != nil {
 					t.Fatal(err)
 				}
@@ -350,7 +350,7 @@ func TestLiveConnect(t *testing.T) {
 	e := liveEnv(t)
 	node, _ := runBridge(t, e)
 	e.waitGateway(t, "gateway ready", func(d gatewayDetail) bool {
-		return d.Online && d.Node != nil && d.Node.State == protocol.NodeConnected && d.Lease == nil
+		return d.Online && d.Node != nil && d.Node.State == meshproto.NodeConnected && d.Lease == nil
 	})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -374,7 +374,7 @@ func TestLiveConnect(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := companion.NewReader(c, companion.HeaderFromNode, protocol.MaxFrameBytes)
+		r := companion.NewReader(c, companion.HeaderFromNode, meshproto.MaxFrameBytes)
 		_ = c.SetDeadline(time.Now().Add(20 * time.Second))
 		if _, err := c.Write(companion.Encode(companion.HeaderToNode, companion.AppStartFrame())); err != nil {
 			t.Fatal(err)

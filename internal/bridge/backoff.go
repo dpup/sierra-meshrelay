@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // Backoff decides how long to wait before redialling the relay.
@@ -64,9 +64,9 @@ func Classify(r SessionResult) Class {
 		return ClassUpgrade
 	}
 	switch r.CloseCode {
-	case protocol.CloseBadToken, protocol.CloseGatewayMismatch:
+	case meshproto.CloseBadToken, meshproto.CloseGatewayMismatch:
 		return ClassAuth
-	case protocol.CloseUnsupported:
+	case meshproto.CloseUnsupported:
 		return ClassUpgrade
 	}
 	return ClassRetry

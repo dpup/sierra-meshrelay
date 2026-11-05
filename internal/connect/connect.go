@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/dpup/sierra-meshbridge/internal/companion"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
 	"github.com/dpup/sierra-meshbridge/internal/relayclient"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // Dialer takes a lease. relayclient.Dial is the real one.
@@ -114,7 +114,7 @@ func (s *Shim) serveOne(ctx context.Context, local net.Conn) {
 
 	// Local app → node.
 	go func() {
-		r := companion.NewReader(local, companion.HeaderToNode, protocol.MaxFrameBytes)
+		r := companion.NewReader(local, companion.HeaderToNode, meshproto.MaxFrameBytes)
 		for {
 			f, err := r.ReadFrame()
 			if err != nil {
@@ -177,13 +177,13 @@ func (s *Shim) serveOne(ctx context.Context, local net.Conn) {
 // handleControl reacts to a relay control message. It returns a line for the
 // user (or "") and whether the session is over.
 func (s *Shim) handleControl(ctx context.Context, rc *relayclient.Conn, m json.RawMessage, lastActive time.Time) (string, bool) {
-	switch protocol.TypeOf(m) {
-	case protocol.TypeLease:
-		var l protocol.Lease
+	switch meshproto.TypeOf(m) {
+	case meshproto.TypeLease:
+		var l meshproto.Lease
 		_ = json.Unmarshal(m, &l)
 		return fmt.Sprintf("Lease renewed until %s.", localTime(l.ExpiresAt)), false
-	case protocol.TypeLeaseEnding:
-		var le protocol.LeaseEnding
+	case meshproto.TypeLeaseEnding:
+		var le meshproto.LeaseEnding
 		_ = json.Unmarshal(m, &le)
 		if le.InS > 0 {
 			if time.Since(lastActive) > s.opts.RenewWhen {
@@ -195,19 +195,19 @@ func (s *Shim) handleControl(ctx context.Context, rc *relayclient.Conn, m json.R
 			return "", false
 		}
 		return LeaseEndedText(le.Reason), true
-	case protocol.TypeGatewayStatus:
-		var gs protocol.GatewayStatus
+	case meshproto.TypeGatewayStatus:
+		var gs meshproto.GatewayStatus
 		_ = json.Unmarshal(m, &gs)
 		if gs.Bridge == "offline" {
 			return "The gateway went offline.", false
 		}
-		if gs.Node != nil && gs.Node.State != protocol.NodeConnected {
+		if gs.Node != nil && gs.Node.State != meshproto.NodeConnected {
 			return fmt.Sprintf("The gateway's node is %s.", gs.Node.State), false
 		}
-	case protocol.TypeError:
-		var e protocol.Error
+	case meshproto.TypeError:
+		var e meshproto.Error
 		_ = json.Unmarshal(m, &e)
-		if e.Code == protocol.ErrRenewDenied {
+		if e.Code == meshproto.ErrRenewDenied {
 			return "The lease has reached its 8-hour limit and will end soon. Reconnect to start a new one.", false
 		}
 		return CodeText(e.Code, nil), false
@@ -224,11 +224,11 @@ func Explain(err error) string {
 			until = re.Status.Node.Until
 		}
 		code := re.Code
-		if code == "" && re.CloseCode == protocol.CloseBusy {
-			code = protocol.ErrBusy
+		if code == "" && re.CloseCode == meshproto.CloseBusy {
+			code = meshproto.ErrBusy
 		}
 		if code == "" && re.Status != nil && re.Status.Bridge == "offline" {
-			code = protocol.ErrGatewayOffline
+			code = meshproto.ErrGatewayOffline
 		}
 		return CodeText(code, &until)
 	}
@@ -254,20 +254,20 @@ func Explain(err error) string {
 // CodeText turns a relay error code into a plain sentence.
 func CodeText(code string, until *string) string {
 	switch code {
-	case protocol.ErrBusy:
+	case meshproto.ErrBusy:
 		return "Someone else is using this gateway."
-	case protocol.ErrGatewayOffline:
+	case meshproto.ErrGatewayOffline:
 		return "Gateway is offline."
-	case "node_" + protocol.NodePaused:
+	case "node_" + meshproto.NodePaused:
 		if until != nil && *until != "" {
 			return fmt.Sprintf("The host has paused sharing until %s.", localTime(*until))
 		}
 		return "The host has paused sharing."
-	case protocol.ErrPubkeyMismatch, protocol.ErrPubkeyUnverified:
+	case meshproto.ErrPubkeyMismatch, meshproto.ErrPubkeyUnverified:
 		return "Gateway's node needs checking by a SIERRA admin."
-	case "node_" + protocol.NodeDisconnected:
+	case "node_" + meshproto.NodeDisconnected:
 		return "The gateway is online, but its node isn't connected."
-	case protocol.ErrUnknownLease:
+	case meshproto.ErrUnknownLease:
 		return "The relay didn't recognise this lease."
 	case "":
 		return "The relay refused the session."
@@ -298,7 +298,7 @@ func LeaseEndedText(reason string) string {
 	return "The lease ended."
 }
 
-func nodeLabel(n *protocol.Node) string {
+func nodeLabel(n *meshproto.Node) string {
 	if n == nil || n.Name == "" {
 		return "node"
 	}

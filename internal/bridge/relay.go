@@ -12,7 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // session is one established (welcomed) relay connection.
@@ -60,9 +60,9 @@ func (b *Bridge) runRelay(ctx context.Context) {
 		case ClassUpgrade:
 			b.log.Error("the relay doesn't support this bridge's protocol version; update required", attrs...)
 		default:
-			if res.CloseCode == protocol.CloseMessageTooBig {
+			if res.CloseCode == meshproto.CloseMessageTooBig {
 				b.log.Error("relay closed with 1009 (message too big): this is a bridge bug", attrs...)
-			} else if res.CloseCode == protocol.CloseReplaced {
+			} else if res.CloseCode == meshproto.CloseReplaced {
 				b.log.Warn("another bridge with this token connected (4009); two bridges sharing a token will flap", attrs...)
 			} else {
 				b.log.Info("relay connection ended; reconnecting", attrs...)
@@ -84,7 +84,7 @@ func (b *Bridge) relaySession(ctx context.Context) (res SessionResult) {
 	dialCtx, cancelDial := context.WithTimeout(ctx, 15*time.Second)
 	conn, resp, err := websocket.Dial(dialCtx, b.dialURL(), &websocket.DialOptions{
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + b.opts.Config.Token}},
-		Subprotocols: []string{protocol.BridgeSubprotocol},
+		Subprotocols: []string{meshproto.BridgeSubprotocol},
 	})
 	cancelDial()
 	if resp != nil && resp.Body != nil {
@@ -98,13 +98,13 @@ func (b *Bridge) relaySession(ctx context.Context) (res SessionResult) {
 		return res
 	}
 	defer conn.CloseNow()
-	if conn.Subprotocol() != protocol.BridgeSubprotocol {
+	if conn.Subprotocol() != meshproto.BridgeSubprotocol {
 		conn.Close(websocket.StatusPolicyViolation, "subprotocol required")
-		res.Err = fmt.Errorf("relay didn't accept subprotocol %s", protocol.BridgeSubprotocol)
+		res.Err = fmt.Errorf("relay didn't accept subprotocol %s", meshproto.BridgeSubprotocol)
 		return res
 	}
 	// Binary frames are ≤512 bytes and text ≤8 KiB; leave room for framing.
-	conn.SetReadLimit(protocol.MaxControlBytes + 1024)
+	conn.SetReadLimit(meshproto.MaxControlBytes + 1024)
 
 	defer func() {
 		if code := websocket.CloseStatus(res.Err); code != -1 {
@@ -113,8 +113,8 @@ func (b *Bridge) relaySession(ctx context.Context) (res SessionResult) {
 	}()
 
 	node, link, ver, _ := b.nodeSnapshot()
-	hello := protocol.Hello{
-		Type: protocol.TypeHello, Protocol: protocol.Version, Gateway: b.opts.Config.Gateway,
+	hello := meshproto.Hello{
+		Type: meshproto.TypeHello, Protocol: meshproto.Version, Gateway: b.opts.Config.Gateway,
 		Agent: b.agent(), Link: link, Node: helloNode(node),
 	}
 	if res.Err = writeJSON(ctx, conn, hello); res.Err != nil {
@@ -191,32 +191,32 @@ func (b *Bridge) relaySession(ctx context.Context) (res SessionResult) {
 }
 
 // helloNode trims node fields the protocol says to omit when not connected.
-func helloNode(n protocol.Node) protocol.Node {
-	if n.State == protocol.NodeConnected || n.State == protocol.NodeMismatch {
+func helloNode(n meshproto.Node) meshproto.Node {
+	if n.State == meshproto.NodeConnected || n.State == meshproto.NodeMismatch {
 		return n
 	}
-	return protocol.Node{State: n.State, Until: n.Until, Error: n.Error}
+	return meshproto.Node{State: n.State, Until: n.Until, Error: n.Error}
 }
 
-func (b *Bridge) awaitWelcome(ctx context.Context, conn *websocket.Conn) (protocol.Welcome, error) {
+func (b *Bridge) awaitWelcome(ctx context.Context, conn *websocket.Conn) (meshproto.Welcome, error) {
 	ctx, cancel := context.WithTimeout(ctx, b.opts.HelloTimeout)
 	defer cancel()
 	for {
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
-			return protocol.Welcome{}, err
+			return meshproto.Welcome{}, err
 		}
 		if typ != websocket.MessageText {
 			continue
 		}
-		switch protocol.TypeOf(data) {
-		case protocol.TypeWelcome:
-			var w protocol.Welcome
+		switch meshproto.TypeOf(data) {
+		case meshproto.TypeWelcome:
+			var w meshproto.Welcome
 			if err := json.Unmarshal(data, &w); err != nil {
 				return w, fmt.Errorf("bad welcome: %w", err)
 			}
 			return w, nil
-		case protocol.TypeError:
+		case meshproto.TypeError:
 			b.logRelayError(data)
 		}
 	}
@@ -230,7 +230,7 @@ func (b *Bridge) readLoop(s *session) error {
 		}
 		switch typ {
 		case websocket.MessageBinary:
-			if len(data) > protocol.MaxFrameBytes {
+			if len(data) > meshproto.MaxFrameBytes {
 				b.log.Warn("dropping oversized frame from relay", "bytes", len(data))
 				b.droppedToNode.Add(1)
 				continue
@@ -243,17 +243,17 @@ func (b *Bridge) readLoop(s *session) error {
 }
 
 func (b *Bridge) handleControl(s *session, data []byte) {
-	switch protocol.TypeOf(data) {
-	case protocol.TypeAttach:
-		var m protocol.Attach
+	switch meshproto.TypeOf(data) {
+	case meshproto.TypeAttach:
+		var m meshproto.Attach
 		if json.Unmarshal(data, &m) == nil {
 			s.mu.Lock()
 			s.leases[m.Lease] = m.Client
 			s.mu.Unlock()
 			b.log.Info("client attached", "lease", m.Lease, "client", m.Client)
 		}
-	case protocol.TypeDetach:
-		var m protocol.Detach
+	case meshproto.TypeDetach:
+		var m meshproto.Detach
 		if json.Unmarshal(data, &m) == nil {
 			s.mu.Lock()
 			client := s.leases[m.Lease]
@@ -261,15 +261,15 @@ func (b *Bridge) handleControl(s *session, data []byte) {
 			s.mu.Unlock()
 			b.log.Info("client detached", "lease", m.Lease, "client", client)
 		}
-	case protocol.TypeRelink:
+	case meshproto.TypeRelink:
 		b.Relink()
-	case protocol.TypeUpdateAvailable:
+	case meshproto.TypeUpdateAvailable:
 		var m struct {
 			Version string `json:"version"`
 		}
 		_ = json.Unmarshal(data, &m)
 		b.log.Info("relay reports an update is available", "version", m.Version)
-	case protocol.TypeError:
+	case meshproto.TypeError:
 		b.logRelayError(data)
 	}
 	// Unknown types are ignored (forward compatibility).
@@ -278,10 +278,10 @@ func (b *Bridge) handleControl(s *session, data []byte) {
 // logRelayError logs an error's code. The message is free text and is never
 // shown or relied on.
 func (b *Bridge) logRelayError(data []byte) {
-	var m protocol.Error
+	var m meshproto.Error
 	_ = json.Unmarshal(data, &m)
 	lvl := slog.LevelWarn
-	if m.Code == protocol.ErrPubkeyMismatch || m.Code == protocol.ErrPubkeyUnverified {
+	if m.Code == meshproto.ErrPubkeyMismatch || m.Code == meshproto.ErrPubkeyUnverified {
 		lvl = slog.LevelError
 	}
 	b.log.Log(context.Background(), lvl, "relay reported an error", "code", m.Code)
@@ -305,7 +305,7 @@ func (b *Bridge) statusLoop(ctx context.Context, s *session, sentVer uint64) err
 	for {
 		node, _, ver, changed := b.nodeSnapshot()
 		if ver != sentVer {
-			msg := protocol.NodeStatus{Type: protocol.TypeNodeStatus, Node: helloNode(node)}
+			msg := meshproto.NodeStatus{Type: meshproto.TypeNodeStatus, Node: helloNode(node)}
 			if err := s.writeJSON(msg); err != nil {
 				return err
 			}
@@ -326,14 +326,13 @@ func (b *Bridge) statsLoop(ctx context.Context, s *session) error {
 	for {
 		select {
 		case <-t.C:
-			msg := protocol.Stats{
-				Type:               protocol.TypeStats,
+			msg := meshproto.StatsMsg{Type: meshproto.TypeStats, Stats: meshproto.Stats{
 				UptimeS:            int64(time.Since(b.started).Seconds()),
 				NodeLinkReconnects: max(b.nodeOpens.Load()-1, 0),
 				FramesToNode:       b.framesToNode.Load(),
 				FramesFromNode:     b.framesFromNode.Load(),
 				RelayReconnects:    max(b.relayWelcomes.Load()-1, 0),
-			}
+			}}
 			if err := s.writeJSON(msg); err != nil {
 				return err
 			}

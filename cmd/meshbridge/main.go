@@ -22,8 +22,8 @@ import (
 	"github.com/dpup/sierra-meshbridge/internal/config"
 	"github.com/dpup/sierra-meshbridge/internal/connect"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
 	"github.com/dpup/sierra-meshbridge/internal/relayclient"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".
@@ -90,7 +90,7 @@ func cmdRun(args []string) error {
 		"node", fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort))
 	b := bridge.New(bridge.Options{
 		Config: cfg, Opener: opener, Log: log, Version: version,
-		LinkKind: protocol.LinkTCP, LinkDetail: fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort),
+		LinkKind: meshproto.LinkTCP, LinkDetail: fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort),
 	})
 	if err := b.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err

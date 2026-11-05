@@ -14,14 +14,14 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 // RefusedError means the relay didn't grant a lease.
 type RefusedError struct {
 	Code      string // relay error code, e.g. busy, gateway_offline, node_paused
 	CloseCode int
-	Status    *protocol.GatewayStatus
+	Status    *meshproto.GatewayStatus
 }
 
 func (e *RefusedError) Error() string {
@@ -41,7 +41,7 @@ func (e *HTTPError) Unwrap() error { return e.Err }
 // Conn is a client session holding a lease.
 type Conn struct {
 	ws    *websocket.Conn
-	Lease protocol.Lease
+	Lease meshproto.Lease
 
 	// Frames delivers payloads from the node. Control delivers control
 	// messages (lease, lease_ending, gateway_status, error) as raw JSON.
@@ -62,7 +62,7 @@ func Dial(ctx context.Context, base, gateway, token string, preempt bool) (*Conn
 	}
 	ws, resp, err := websocket.Dial(ctx, u, &websocket.DialOptions{
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + token}},
-		Subprotocols: []string{protocol.ClientSubprotocol},
+		Subprotocols: []string{meshproto.ClientSubprotocol},
 	})
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
@@ -73,7 +73,7 @@ func Dial(ctx context.Context, base, gateway, token string, preempt bool) (*Conn
 		}
 		return nil, fmt.Errorf("dial: %w", err)
 	}
-	ws.SetReadLimit(protocol.MaxControlBytes + 1024)
+	ws.SetReadLimit(meshproto.MaxControlBytes + 1024)
 
 	refused := &RefusedError{CloseCode: -1}
 	for {
@@ -89,8 +89,8 @@ func Dial(ctx context.Context, base, gateway, token string, preempt bool) (*Conn
 		if typ != websocket.MessageText {
 			continue
 		}
-		switch protocol.TypeOf(data) {
-		case protocol.TypeLease:
+		switch meshproto.TypeOf(data) {
+		case meshproto.TypeLease:
 			c := &Conn{ws: ws, Frames: make(chan []byte, 256), Control: make(chan json.RawMessage, 64)}
 			if err := json.Unmarshal(data, &c.Lease); err != nil {
 				ws.CloseNow()
@@ -98,12 +98,12 @@ func Dial(ctx context.Context, base, gateway, token string, preempt bool) (*Conn
 			}
 			go c.readLoop()
 			return c, nil
-		case protocol.TypeError:
-			var m protocol.Error
+		case meshproto.TypeError:
+			var m meshproto.Error
 			_ = json.Unmarshal(data, &m)
 			refused.Code = m.Code
-		case protocol.TypeGatewayStatus:
-			var m protocol.GatewayStatus
+		case meshproto.TypeGatewayStatus:
+			var m meshproto.GatewayStatus
 			_ = json.Unmarshal(data, &m)
 			refused.Status = &m
 		}
@@ -138,8 +138,8 @@ func (c *Conn) Err() error {
 
 // SendFrame sends one companion payload to the node.
 func (c *Conn) SendFrame(ctx context.Context, payload []byte) error {
-	if len(payload) > protocol.MaxFrameBytes {
-		return fmt.Errorf("frame of %d bytes exceeds %d", len(payload), protocol.MaxFrameBytes)
+	if len(payload) > meshproto.MaxFrameBytes {
+		return fmt.Errorf("frame of %d bytes exceeds %d", len(payload), meshproto.MaxFrameBytes)
 	}
 	return c.ws.Write(ctx, websocket.MessageBinary, payload)
 }
@@ -147,7 +147,7 @@ func (c *Conn) SendFrame(ctx context.Context, payload []byte) error {
 // Renew asks to extend the lease. The relay answers with a new lease message
 // (or an error) on Control.
 func (c *Conn) Renew(ctx context.Context) error {
-	b, _ := json.Marshal(protocol.Renew{Type: protocol.TypeRenew, Lease: c.Lease.Lease})
+	b, _ := json.Marshal(meshproto.Renew{Type: meshproto.TypeRenew, Lease: c.Lease.Lease})
 	return c.ws.Write(ctx, websocket.MessageText, b)
 }
 

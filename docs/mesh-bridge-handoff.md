@@ -1,6 +1,6 @@
 # Handoff: SIERRA Mesh Bridge (`meshbridge`)
 
-*For a new agent in a new repo. Read `sierra-mesh-protocol.md` first. It's the canonical wire spec, shared with the relay on the SIERRA data server. Copy it into this repo as `docs/protocol.md`. Where this handoff and the protocol disagree, the protocol wins.*
+*For a new agent in a new repo. Read the wire spec first: [PROTOCOL.md](https://github.com/dpup/sierra-meshrelay-protocol/blob/main/PROTOCOL.md) in `dpup/sierra-meshrelay-protocol`, shared with the relay. Where this handoff and the protocol disagree, the protocol wins.*
 
 ## Where things stand
 
@@ -272,7 +272,7 @@ CLI only for now. A native "Connect to a gateway" feature can come later.
 - **Fake node:** speaks companion framing over TCP and a virtual serial pair, answers `APP_START` with a configurable `SELF_INFO`.
 - **Real relay first.** The relay is live. Ask a SIERRA admin for a test gateway and token, and run the conformance tests against it in CI or nightly.
 - **Fake relay:** still useful, for offline unit tests and for pairing and pause until the relay ships them. Implement the relay side of the protocol, including a CLI to approve pairing codes. Publish it as `cmd/fakerelay`. Match the live relay's behaviour where the protocol pins it down: backpressure rather than drops, error codes, and close codes.
-- **Conformance tests** from `docs/protocol.md`:
+- **Conformance tests** from the protocol spec:
   - `hello`/`welcome`
   - Close codes, including 1001 and 1009
   - Backoff
@@ -309,4 +309,4 @@ Polling and telemetry (the relay does that). Messaging UI. Changing node setting
 
 ## Future (not this repo yet): embedded bridge
 
-A dedicated low-cost bridge device, possibly a 3D-printed box with a companion node inside, implementing the same protocol, probably on an ESP32-class chip. Pairing works the same way. A tiny display or LED blink pattern shows the code. Keep `docs/protocol.md` the source of truth.
+A dedicated low-cost bridge device, possibly a 3D-printed box with a companion node inside, implementing the same protocol, probably on an ESP32-class chip. Pairing works the same way. A tiny display or LED blink pattern shows the code. Keep the protocol repo the source of truth.

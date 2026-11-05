@@ -14,8 +14,8 @@ import (
 	"github.com/dpup/sierra-meshbridge/internal/config"
 	"github.com/dpup/sierra-meshbridge/internal/fakenode"
 	"github.com/dpup/sierra-meshbridge/internal/nodelink"
-	"github.com/dpup/sierra-meshbridge/internal/protocol"
 	"github.com/dpup/sierra-meshbridge/internal/relaytest"
+	meshproto "github.com/dpup/sierra-meshrelay-protocol"
 )
 
 const token = "smb_test-token"
@@ -118,7 +118,7 @@ func (h *harness) attach(s *relaytest.Session) {
 	h.waitFor("attach", func(st bridge.Status) bool { return st.Attached })
 }
 
-func expectNode(t *testing.T, s *relaytest.Session, state string) protocol.Node {
+func expectNode(t *testing.T, s *relaytest.Session, state string) meshproto.Node {
 	t.Helper()
 	n, err := s.ExpectNode(state)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestHelloAndIdentity(t *testing.T) {
 		s.Hello.Agent.Version != "test" || s.Hello.Agent.OS == "" || s.Hello.Link.Kind != "tcp" {
 		t.Fatalf("hello = %+v", s.Hello)
 	}
-	n := expectNode(t, s, protocol.NodeConnected)
+	n := expectNode(t, s, meshproto.NodeConnected)
 	if n.Pubkey != h.node.PubkeyHex() || n.Name != "JayNode" || n.Model != "Heltec V4" || n.FW != "v1.18.0" {
 		t.Fatalf("node = %+v", n)
 	}
@@ -161,7 +161,7 @@ func TestHelloAndIdentity(t *testing.T) {
 func TestFramesRoundTrip(t *testing.T) {
 	h := start(t, setup{})
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	h.attach(s)
 	for i := range 20 {
 		f := append([]byte{0x20, byte(i)}, "SECRET"...)
@@ -182,7 +182,7 @@ func TestFramesRoundTrip(t *testing.T) {
 func TestNodeFramesDroppedWithoutLease(t *testing.T) {
 	h := start(t, setup{})
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	if err := h.node.Push([]byte("\x80SECRET")); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestNodeFramesDroppedWithoutLease(t *testing.T) {
 
 	// After detach, frames are dropped again.
 	h.attach(s)
-	if err := s.Send(protocol.Detach{Type: protocol.TypeDetach, Lease: "l_1"}); err != nil {
+	if err := s.Send(meshproto.Detach{Type: meshproto.TypeDetach, Lease: "l_1"}); err != nil {
 		t.Fatal(err)
 	}
 	h.waitFor("detach", func(st bridge.Status) bool { return !st.Attached })
@@ -206,12 +206,12 @@ func TestNodeFramesDroppedWithoutLease(t *testing.T) {
 func TestRelink(t *testing.T) {
 	h := start(t, setup{})
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
-	if err := s.Send(protocol.Relink{Type: protocol.TypeRelink}); err != nil {
+	expectNode(t, s, meshproto.NodeConnected)
+	if err := s.Send(meshproto.Relink{Type: meshproto.TypeRelink}); err != nil {
 		t.Fatal(err)
 	}
-	expectNode(t, s, protocol.NodeDisconnected)
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeDisconnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	if got := h.node.Accepted(); got != 2 {
 		t.Fatalf("node accepted %d connections, want 2", got)
 	}
@@ -220,13 +220,13 @@ func TestRelink(t *testing.T) {
 func TestNodeDropRelayStays(t *testing.T) {
 	h := start(t, setup{})
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	h.node.DropConn() // node reboot
-	n := expectNode(t, s, protocol.NodeDisconnected)
+	n := expectNode(t, s, meshproto.NodeDisconnected)
 	if n.Error == "" || n.Pubkey != "" {
 		t.Fatalf("disconnected node = %+v", n)
 	}
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	if err := h.relay.NoSession(100 * time.Millisecond); err != nil {
 		t.Fatal("relay session was replaced:", err)
 	}
@@ -235,7 +235,7 @@ func TestNodeDropRelayStays(t *testing.T) {
 func TestRelayUpWithoutNode(t *testing.T) {
 	h := start(t, setup{noNode: true})
 	s := h.session()
-	if s.Hello.Node.State != protocol.NodeDisconnected {
+	if s.Hello.Node.State != meshproto.NodeDisconnected {
 		t.Fatalf("hello node = %+v", s.Hello.Node)
 	}
 	h.waitFor("relay connected", func(st bridge.Status) bool { return st.RelayConnected })
@@ -244,7 +244,7 @@ func TestRelayUpWithoutNode(t *testing.T) {
 func TestPubkeyMismatch(t *testing.T) {
 	h := start(t, setup{expected: strings.Repeat("ab", 32)})
 	s := h.session()
-	n := expectNode(t, s, protocol.NodeMismatch)
+	n := expectNode(t, s, meshproto.NodeMismatch)
 	if n.Pubkey != h.node.PubkeyHex() {
 		t.Fatalf("mismatch node = %+v", n)
 	}
@@ -262,7 +262,7 @@ func TestExpectedPubkeyMatches(t *testing.T) {
 	key := fakenode.KeyFor("expected")
 	h := start(t, setup{nodeOpts: fakenode.Options{Pubkey: key}, expected: strings.ToLower(hex.EncodeToString(key))})
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 }
 
 func TestSilentNodeNeverConnects(t *testing.T) {
@@ -270,7 +270,7 @@ func TestSilentNodeNeverConnects(t *testing.T) {
 	s := h.session()
 	_ = s
 	time.Sleep(500 * time.Millisecond)
-	if st := h.bridge.Status(); st.Node.State != protocol.NodeDisconnected {
+	if st := h.bridge.Status(); st.Node.State != meshproto.NodeDisconnected {
 		t.Fatalf("node state %q", st.Node.State)
 	}
 	if !strings.Contains(h.logs.String(), "identity check failed") {
@@ -281,29 +281,29 @@ func TestSilentNodeNeverConnects(t *testing.T) {
 func TestOversizeNodeFrameRelinks(t *testing.T) {
 	h := start(t, setup{})
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	h.attach(s)
 	// A header announcing 600 bytes: the link is broken, not forwarded.
 	_ = h.node.Push(make([]byte, 600))
-	n := expectNode(t, s, protocol.NodeDisconnected)
+	n := expectNode(t, s, meshproto.NodeDisconnected)
 	if n.Error != "node link out of sync" {
 		t.Fatalf("error = %q", n.Error)
 	}
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	if err := s.NoFrame(100 * time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestReconnectAfterRelayClose(t *testing.T) {
-	for _, code := range []int{protocol.CloseNormal, protocol.CloseGoingAway, protocol.CloseMessageTooBig, protocol.CloseReplaced} {
+	for _, code := range []int{meshproto.CloseNormal, meshproto.CloseGoingAway, meshproto.CloseMessageTooBig, meshproto.CloseReplaced} {
 		h := start(t, setup{})
 		s := h.session()
-		expectNode(t, s, protocol.NodeConnected)
+		expectNode(t, s, meshproto.NodeConnected)
 		_ = s.Close(code, "test")
 		s2 := h.session()
 		// The new session's hello carries the live node state.
-		if s2.Hello.Node.State != protocol.NodeConnected {
+		if s2.Hello.Node.State != meshproto.NodeConnected {
 			t.Fatalf("close %d: second hello node = %+v", code, s2.Hello.Node)
 		}
 		h.stop()
@@ -311,7 +311,7 @@ func TestReconnectAfterRelayClose(t *testing.T) {
 }
 
 func TestAuthCloseBacksOff(t *testing.T) {
-	for _, code := range []int{protocol.CloseBadToken, protocol.CloseGatewayMismatch, protocol.CloseUnsupported} {
+	for _, code := range []int{meshproto.CloseBadToken, meshproto.CloseGatewayMismatch, meshproto.CloseUnsupported} {
 		h := start(t, setup{})
 		s := h.session()
 		h.waitFor("relay session", func(st bridge.Status) bool { return st.RelayConnected })
@@ -341,7 +341,7 @@ func TestBackpressureNoDrops(t *testing.T) {
 	h := start(t, setup{tune: func(o *bridge.Options) { o.OutQueue = 8 }})
 	h.relay.ReadDelay = 200 * time.Microsecond
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	h.attach(s)
 	go func() {
 		for i := range n {
@@ -365,8 +365,8 @@ func TestBackpressureNoDrops(t *testing.T) {
 func TestStats(t *testing.T) {
 	h := start(t, setup{tune: func(o *bridge.Options) { o.StatsInterval = 50 * time.Millisecond }})
 	s := h.session()
-	var st protocol.Stats
-	if err := s.Expect(protocol.TypeStats, &st); err != nil {
+	var st meshproto.StatsMsg
+	if err := s.Expect(meshproto.TypeStats, &st); err != nil {
 		t.Fatal(err)
 	}
 	if st.RelayReconnects != 0 || st.UptimeS < 0 {
@@ -377,11 +377,11 @@ func TestStats(t *testing.T) {
 func TestShutdownClosesGoingAway(t *testing.T) {
 	h := start(t, setup{})
 	s := h.session()
-	expectNode(t, s, protocol.NodeConnected)
+	expectNode(t, s, meshproto.NodeConnected)
 	h.waitFor("relay session", func(st bridge.Status) bool { return st.RelayConnected })
 	h.cancel()
 	code := expectClosed(t, s)
-	if code != protocol.CloseGoingAway {
+	if code != meshproto.CloseGoingAway {
 		t.Fatalf("close code %d, want 1001", code)
 	}
 }
@@ -389,7 +389,7 @@ func TestShutdownClosesGoingAway(t *testing.T) {
 func TestErrorMessageLogsCodeOnly(t *testing.T) {
 	h := start(t, setup{})
 	s := h.session()
-	_ = s.Send(protocol.Error{Type: protocol.TypeError, Code: protocol.ErrPubkeyMismatch, Message: "SECRET detail"})
+	_ = s.Send(meshproto.Error{Type: meshproto.TypeError, Code: meshproto.ErrPubkeyMismatch, Message: "SECRET detail"})
 	_ = s.Send(map[string]string{"type": "some_future_message"})
 	deadline := time.Now().Add(2 * time.Second)
 	for !strings.Contains(h.logs.String(), "code=pubkey_mismatch") {
