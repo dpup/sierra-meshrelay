@@ -8,7 +8,6 @@ Connects a MeshCore companion radio to the SIERRA Mesh Relay, so authorized SIER
 
 - [docs/mesh-bridge-handoff.md](docs/mesh-bridge-handoff.md): what we're building and why, plus the milestones.
 - [docs/mesh-relay-wireprotocol.md](docs/mesh-relay-wireprotocol.md): the wire protocol. It's shared with the relay (`dpup/sierra-data`), so change it in both places.
-- [docs/live-testing.md](docs/live-testing.md): rules for testing against the production relay.
 
 ## Status
 
@@ -22,7 +21,7 @@ cp examples/meshbridge.toml meshbridge.local.toml   # set gateway and node.tcp_h
 MESHBRIDGE_TOKEN=smb_… ./bin/meshbridge run -config meshbridge.local.toml
 ```
 
-`./bin/meshbridge find-node -host 192.168.4.50` runs the identity check against a TCP node and prints its name, pubkey, model and firmware. Use that pubkey as `node.expected_pubkey`.
+`./bin/meshbridge find-node -host 192.168.1.50` runs the identity check against a TCP node and prints its name, pubkey, model and firmware. Use that pubkey as `node.expected_pubkey`.
 
 ### Using a remote gateway (client mode)
 
