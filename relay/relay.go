@@ -138,8 +138,11 @@ type Relay struct {
 
 	lockout *ipLockout
 	pairs   *pairingState
-	debug   map[string]bool
-	m       metrics
+
+	logMu      sync.Mutex
+	logPending map[string]*pendingLogs // bridge log lines waiting to be written
+	debug      map[string]bool
+	m          metrics
 
 	lifeMu  sync.Mutex         // guards cancel and halted: Init runs on prefab's goroutine, Stop on the handoff's
 	cancel  context.CancelFunc // stops Run; set by Init

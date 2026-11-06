@@ -331,8 +331,9 @@ func TestWindowsService(t *testing.T) {
 	}
 	deadline = time.Now().Add(120 * time.Second)
 	for {
-		d := lr.gateway("win-svc")
-		if connected(d) && d.Agent != nil && d.Agent.Version == "v9.9.10" {
+		var d gatewayDetail
+		code := lr.api("GET", "/gateways/win-svc", nil, &d)
+		if code == 200 && connected(d) && d.Agent != nil && d.Agent.Version == "v9.9.10" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -357,8 +358,12 @@ func waitConnected(t *testing.T, lr *localRelay, gateway string, want bool, time
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		d := lr.gateway(gateway)
-		if connected(d) == want {
+		// Polls through transient errors: the relay's SQLite can report
+		// "locked" for a few seconds when Windows is busy with the disk
+		// (Defender, servicing) on a CI runner.
+		var d gatewayDetail
+		code := lr.api("GET", "/gateways/"+gateway, nil, &d)
+		if code == 200 && connected(d) == want {
 			return
 		}
 		if time.Now().After(deadline) {

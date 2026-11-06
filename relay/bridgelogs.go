@@ -172,7 +172,43 @@ func (r *Relay) bridgeLog(s *bridgeSession, data []byte) {
 		}
 		out = append(out, BridgeLog{T: clip(e.T), Level: clip(e.Level), Msg: clip(e.Msg), Attrs: attrs})
 	}
-	r.audit("bridge log", func(st *Store) error { return st.addBridgeLogs(s.gateway, now, out) })
+	r.queueLogs(s.gateway, now, out)
+}
+
+// logFlushDelay batches bridge log lines into one write per gateway, so a
+// chatty bridge costs one small transaction every couple of seconds rather
+// than one per message.
+const logFlushDelay = 2 * time.Second
+
+type pendingLogs struct {
+	at    time.Time
+	lines []BridgeLog
+}
+
+func (r *Relay) queueLogs(gateway string, at time.Time, lines []BridgeLog) {
+	r.logMu.Lock()
+	defer r.logMu.Unlock()
+	if r.logPending == nil {
+		r.logPending = map[string]*pendingLogs{}
+	}
+	p := r.logPending[gateway]
+	if p == nil {
+		p = &pendingLogs{}
+		r.logPending[gateway] = p
+		time.AfterFunc(logFlushDelay, func() { r.flushLogs(gateway) })
+	}
+	p.at = at
+	p.lines = append(p.lines, lines...)
+}
+
+func (r *Relay) flushLogs(gateway string) {
+	r.logMu.Lock()
+	p := r.logPending[gateway]
+	delete(r.logPending, gateway)
+	r.logMu.Unlock()
+	if p != nil && len(p.lines) > 0 {
+		r.audit("bridge log", func(st *Store) error { return st.addBridgeLogs(gateway, p.at, p.lines) })
+	}
 }
 
 func (r *Relay) apiGatewayLogs(req *http.Request, _ *ClientRecord) (any, error) {

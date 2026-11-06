@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,6 +70,24 @@ func signedRelease(t *testing.T, key ed25519.PrivateKey, version string, binary 
 	return srv
 }
 
+// syncBuffer is a bytes.Buffer safe to read while a process writes to it.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
 // TestAutoUpdate runs the real binary the way the systemd unit does: the
 // relay offers a signed release, the bridge downloads and verifies it and
 // exits, and apply-update (ExecStartPre) swaps the binary in.
@@ -93,15 +112,15 @@ func TestAutoUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runService := func() (*exec.Cmd, *bytes.Buffer) {
-		var out bytes.Buffer
+	runService := func() (*exec.Cmd, *syncBuffer) {
+		out := &syncBuffer{}
 		cmd := exec.Command(bin, "run", "-service", "-control", "off", "-config", cfgPath)
-		cmd.Stdout, cmd.Stderr = &out, &out
+		cmd.Stdout, cmd.Stderr = out, out
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-		return cmd, &out
+		return cmd, out
 	}
 	cmd, out := runService()
 	lr.waitGateway("cabin", "v9.9.9 online", func(d gatewayDetail) bool { return connected(d) })
@@ -167,9 +186,9 @@ func TestAutoUpdateRefusesUnsignedRelease(t *testing.T) {
 	cfg.Node.TCPHost, cfg.Node.TCPPort = "127.0.0.1", node.Addr().Port
 	cfgPath := filepath.Join(work, "conf", "meshbridge.toml")
 	_ = config.Save(cfgPath, cfg)
-	var out bytes.Buffer
+	out := &syncBuffer{}
 	cmd := exec.Command(bin, "run", "-service", "-control", "off", "-config", cfgPath)
-	cmd.Stdout, cmd.Stderr = &out, &out
+	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
