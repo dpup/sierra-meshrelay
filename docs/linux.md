@@ -85,7 +85,8 @@ Pausing frees the node's single connection, so you can use your own MeshCore app
 ## Sharing a repeater
 
 ```sh
-sudo meshbridge repeater add       # lists the repeaters your node has heard; pick one and enter its password
+sudo meshbridge repeater add       # lists the repeaters your node has heard, by name; type a number, or part of a name to narrow the list
+sudo meshbridge repeater add ridge # only the ones whose name contains "ridge"
 sudo meshbridge repeater list
 sudo meshbridge repeater remove "Ridge RPT"
 ```

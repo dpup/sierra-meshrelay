@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -22,7 +23,7 @@ SIERRA logs in to a shared repeater over the mesh to read its status
 (battery, airtime, packet counts) and report it on the Grid.
 
 Usage:
-  meshbridge repeater add [name or pubkey]   Pick a repeater your node knows and share it
+  meshbridge repeater add [name or pubkey]   Pick a repeater your node knows (part of a name narrows the list) and share it
   meshbridge repeater list                   Repeaters this bridge has shared
   meshbridge repeater remove <name or pubkey>
                                              Stop sharing one (deletes its password from SIERRA)
@@ -97,7 +98,7 @@ func cmdRepeater(args []string) error {
 		if err != nil {
 			return err
 		}
-		pick, err := pickNearby(near, strings.Join(pos, " "), in)
+		pick, err := pickNearby(near, strings.Join(pos, " "), in, isTerminal(os.Stdin))
 		if err != nil {
 			return err
 		}
@@ -134,31 +135,86 @@ func cmdRepeater(args []string) error {
 	return fmt.Errorf("unknown repeater command %q\n\n%s", sub, repeaterUsage)
 }
 
-// pickNearby chooses a repeater: by name or pubkey prefix if given, else by
-// asking.
-func pickNearby(near []admin.NearbyRepeater, want string, in *bufio.Reader) (admin.NearbyRepeater, error) {
+// pickNearby chooses a repeater. want (from the command line) picks one by
+// exact name or pubkey prefix, or narrows the list to names containing it.
+// Otherwise it lists them by name and asks: a number picks one, anything else
+// narrows the list again.
+func pickNearby(near []admin.NearbyRepeater, want string, in *bufio.Reader, interactive bool) (admin.NearbyRepeater, error) {
 	if len(near) == 0 {
 		return admin.NearbyRepeater{}, fmt.Errorf("your node hasn't heard any repeaters yet. A repeater shows up once your node hears its advert; " +
 			"send a flood advert from the repeater (or wait for its next one) and try again")
 	}
+	all := slices.Clone(near)
+	slices.SortStableFunc(all, func(a, b admin.NearbyRepeater) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
+	shown := all
 	if want != "" {
-		var hits []admin.NearbyRepeater
-		for _, r := range near {
+		var exact []admin.NearbyRepeater
+		for _, r := range all {
 			if strings.EqualFold(r.Name, want) || strings.HasPrefix(r.Pubkey, strings.ToLower(want)) {
-				hits = append(hits, r)
+				exact = append(exact, r)
 			}
 		}
-		switch len(hits) {
-		case 1:
-			return hits[0], nil
-		case 0:
-			return admin.NearbyRepeater{}, fmt.Errorf("your node doesn't know a repeater called %q", want)
+		if len(exact) == 1 {
+			return exact[0], nil
 		}
-		near = hits
+		if shown = exact; len(shown) == 0 {
+			shown = matchNearby(all, want)
+		}
+		switch len(shown) {
+		case 0:
+			return admin.NearbyRepeater{}, fmt.Errorf("your node doesn't know a repeater whose name contains %q", want)
+		case 1:
+			return shown[0], nil
+		}
 	}
-	fmt.Println("\nRepeaters your node has heard:")
+	for {
+		if len(shown) == len(all) {
+			fmt.Printf("\nRepeaters your node has heard (%d):\n", len(all))
+		} else {
+			fmt.Printf("\nRepeaters matching (%d of %d):\n", len(shown), len(all))
+		}
+		printNearby(shown)
+		if !interactive {
+			return admin.NearbyRepeater{}, fmt.Errorf("name the repeater: meshbridge repeater add <name, part of a name, or pubkey>")
+		}
+		for {
+			fmt.Printf("Number [1-%d], or part of a name to search: ", len(shown))
+			line, err := in.ReadString('\n')
+			line = strings.TrimSpace(line)
+			if n, perr := strconv.Atoi(line); perr == nil && n >= 1 && n <= len(shown) {
+				return shown[n-1], nil
+			}
+			if line != "" {
+				if hits := matchNearby(all, line); len(hits) > 0 {
+					shown = hits
+					break
+				}
+				fmt.Printf("No repeater's name contains %q.\n", line)
+			}
+			if err != nil {
+				return admin.NearbyRepeater{}, fmt.Errorf("no repeater chosen")
+			}
+		}
+	}
+}
+
+// matchNearby keeps the repeaters whose name contains q, ignoring case.
+func matchNearby(rs []admin.NearbyRepeater, q string) []admin.NearbyRepeater {
+	q = strings.ToLower(q)
+	var out []admin.NearbyRepeater
+	for _, r := range rs {
+		if strings.Contains(strings.ToLower(r.Name), q) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func printNearby(rs []admin.NearbyRepeater) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	for i, r := range near {
+	for i, r := range rs {
 		heard, shared := "-", ""
 		if r.LastAdvert != nil {
 			heard = ago(*r.LastAdvert)
@@ -169,19 +225,6 @@ func pickNearby(near []admin.NearbyRepeater, want string, in *bufio.Reader) (adm
 		fmt.Fprintf(w, "  %d.\t%s\t%s…\tadvert %s\t%s\n", i+1, r.Name, r.Pubkey[:12], heard, shared)
 	}
 	w.Flush()
-	if !isTerminal(os.Stdin) {
-		return admin.NearbyRepeater{}, fmt.Errorf("name the repeater: meshbridge repeater add <name or pubkey>")
-	}
-	for {
-		fmt.Printf("Which one? [1-%d]: ", len(near))
-		line, err := in.ReadString('\n')
-		if n, perr := strconv.Atoi(strings.TrimSpace(line)); perr == nil && n >= 1 && n <= len(near) {
-			return near[n-1], nil
-		}
-		if err != nil {
-			return admin.NearbyRepeater{}, fmt.Errorf("no repeater chosen")
-		}
-	}
 }
 
 func pickShared(rs []admin.Repeater, want string) (admin.Repeater, error) {

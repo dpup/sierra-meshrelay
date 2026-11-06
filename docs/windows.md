@@ -94,7 +94,8 @@ Pausing frees the node's single connection, so you can use your own MeshCore app
 ## Sharing a repeater
 
 ```powershell
-meshbridge repeater add       # lists the repeaters your node has heard; pick one and enter its password
+meshbridge repeater add       # lists the repeaters your node has heard, by name; type a number, or part of a name to narrow the list
+meshbridge repeater add ridge # only the ones whose name contains "ridge"
 meshbridge repeater list
 meshbridge repeater remove "Ridge RPT"
 ```
