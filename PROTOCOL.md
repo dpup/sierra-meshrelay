@@ -348,7 +348,7 @@ An invite is an approval created ahead of time. An admin creates it through the 
 | Field | Meaning |
 |---|---|
 | `gateway` | Gateway name the redeemer gets. If the gateway already exists, redeeming re-pairs it (rotating the token). Omit it for a multi-use invite. |
-| `name_prefix` | For multi-use invites: gateways are named `<prefix>-<n>`, e.g. `workshop-1`, `workshop-2`. Admins can rename them later. |
+| `name_prefix` | For multi-use invites: gateways are named `<prefix>-<n>`, e.g. `workshop-1`, `workshop-2`. Gateways can't be renamed: to change a name, an admin removes the gateway and sends a new invite. |
 | `max_uses` | Default 1. Above 1 is for setup sessions where several hosts install at once. |
 | `expires_at` | Default 7 days, max 30. |
 | `expected_pubkey` | Optional. If set, the bridge's reported node pubkey must match or the redemption fails with `invalid_passphrase`. If unset, the node pubkey reported at redemption is pinned. If no node was connected at redemption, the first pubkey in `hello` is pinned. |

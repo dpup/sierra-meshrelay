@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ Usage:
   meshbridge admin invites                       List invites
   meshbridge admin revoke <invite-id>            Revoke an invite
   meshbridge admin gateways                      Gateways and their status
+  meshbridge admin remove <gateway> [-yes]       Delete a gateway (revokes its token, disconnects its bridge)
   meshbridge admin logs <gateway> [-n 50] [-f]   A bridge's recent log lines and connects/disconnects
   meshbridge admin update-bridges [vX.Y.Z|off] [-gateway a,b]
                                                  Offer bridges a release (they install it when idle)
@@ -56,6 +58,7 @@ func cmdAdmin(args []string) error {
 	days := fs.Float64("days", 7, "invite: days until it expires (max 30)")
 	node := fs.String("node", "", "invite: only redeemable by the node with this pubkey")
 	note := fs.String("note", "", "invite: a note for admins")
+	yes := fs.Bool("yes", false, "remove: don't ask for confirmation")
 	lines := fs.Int("n", 50, "logs: how many lines")
 	follow := fs.Bool("f", false, "logs: keep printing new lines")
 	only := fs.String("gateway", "", "update-bridges: only these gateways (comma-separated)")
@@ -186,6 +189,48 @@ func cmdAdmin(args []string) error {
 			return err
 		}
 		fmt.Printf("Revoked %s.\n", arg(0))
+		return nil
+
+	case "remove", "rm":
+		name := arg(0)
+		if name == "" {
+			return fmt.Errorf("usage: meshbridge admin remove <gateway>")
+		}
+		gs, err := c.Gateways(ctx)
+		if err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(gs, func(g admin.Gateway) bool { return g.Name == name }) {
+			return fmt.Errorf("no gateway named %q (see meshbridge admin gateways)", name)
+		}
+		// Repeaters it shared stay shared, but only an admin can remove them now.
+		var shared []string
+		if rs, err := c.Repeaters(ctx); err == nil {
+			for _, r := range rs {
+				if r.AddedByGateway == name {
+					shared = append(shared, r.Name)
+				}
+			}
+		}
+		fmt.Printf("Removing %s revokes its token and disconnects its bridge now. Its connect history and logs are deleted.\n", name)
+		fmt.Println("To pair the host again, send it a new invite; it must move its old meshbridge.toml aside first.")
+		if len(shared) > 0 {
+			fmt.Printf("It shared %s. They stay shared; only an admin can remove them after this.\n", strings.Join(shared, ", "))
+		}
+		if !*yes {
+			if !isTerminal(os.Stdin) {
+				return fmt.Errorf("pass -yes to remove %s without a prompt", name)
+			}
+			fmt.Printf("Type the gateway name to confirm: ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			if strings.TrimSpace(line) != name {
+				return fmt.Errorf("not removed")
+			}
+		}
+		if err := c.RemoveGateway(ctx, name); err != nil {
+			return err
+		}
+		fmt.Printf("Removed %s.\n", name)
 		return nil
 
 	case "gateways":

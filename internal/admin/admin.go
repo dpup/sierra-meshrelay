@@ -220,6 +220,12 @@ func (c *Client) RevokeInvite(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/invites/"+url.PathEscape(id), nil, nil)
 }
 
+// RemoveGateway deletes a gateway: its token stops working, its bridge is
+// disconnected, and its connect history and logs are deleted.
+func (c *Client) RemoveGateway(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodDelete, "/gateways/"+url.PathEscape(name), nil, nil)
+}
+
 // Gateways lists gateways with their status.
 func (c *Client) Gateways(ctx context.Context) ([]Gateway, error) {
 	var out struct {
