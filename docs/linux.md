@@ -2,6 +2,33 @@
 
 This runs a long-lived bridge as a systemd service on any Linux machine on the same network as a WiFi (or Ethernet) MeshCore companion node. The machine can be x86-64, arm64 or a Raspberry Pi. USB nodes need serial support, which isn't built yet.
 
+## Quick install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.sh | sh
+```
+
+This does steps 1–3 below in one go:
+- downloads the latest release for this machine's CPU and checks its SHA-256 against the release's `SHA256SUMS`,
+- installs the binary to `/usr/local/bin`,
+- pairs with SIERRA (asking for your passphrase, or showing a pairing code),
+- installs and starts the service.
+
+It runs as your user and uses `sudo` only for the steps that need root, so read it first if you like ([scripts/install.sh](../scripts/install.sh)). Running it again upgrades the bridge. An already-paired bridge isn't paired again.
+
+Options go after `sh -s --`:
+
+```sh
+curl -fsSL …/install.sh | sh -s -- --passphrase "maple river quartz otter"   # pre-approved; no prompts
+curl -fsSL …/install.sh | sh -s -- --host 192.168.1.50                        # node on another subnet
+curl -fsSL …/install.sh | sh -s -- --version v0.4.0                           # a specific release
+curl -fsSL …/install.sh | sh -s -- --no-service                               # pair, but don't install the service
+```
+
+With `--passphrase`, nobody needs to be at the keyboard, so it suits Pi images and installing a batch of machines with a multi-use invite. Without a terminal and without a passphrase, it prints a pairing code and waits for approval.
+
+To do it step by step instead:
+
 ## 1. Download
 
 ```sh

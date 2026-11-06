@@ -52,7 +52,13 @@ Bridge: `setup` (pairing), `status`, `pause` and `resume` work over a loopback c
 
 ## Running
 
-On a Linux box, follow [docs/linux.md](docs/linux.md): download a release, then `sudo meshbridge setup && sudo meshbridge install`.
+On a Linux box (x86-64, arm64 or Raspberry Pi):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.sh | sh
+```
+
+That downloads and verifies the latest release, pairs with SIERRA, and installs the systemd service. See [docs/linux.md](docs/linux.md) for options, upgrades and troubleshooting.
 
 From source:
 
