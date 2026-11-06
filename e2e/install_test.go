@@ -113,10 +113,14 @@ func TestInstallScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Installed meshbridge v9.9.9", "Found: Pi Node", `Connected to SIERRA as gateway "pi-test"`, "Skipped the service"} {
+	for _, want := range []string{"Installed meshbridge v9.9.9", "Found: Pi Node", `Connected to SIERRA as gateway "pi-test"`,
+		"Installing the service…", "Skipped the service"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "Start the bridge with") {
+		t.Errorf("setup told the user to start the bridge by hand during an install:\n%s", out)
 	}
 	cfg, err := os.ReadFile(filepath.Join(env.work, "etc", "meshbridge.toml"))
 	if err != nil || !strings.Contains(string(cfg), `token = "smb_`) || !strings.Contains(string(cfg), node.PubkeyHex()) {

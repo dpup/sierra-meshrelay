@@ -62,6 +62,7 @@ func cmdSetup(args []string) error {
 	host := fs.String("host", "", "your node's address on this network (WiFi/Ethernet nodes)")
 	port := fs.Int("port", 5000, "your node's TCP port")
 	repair := fs.Bool("repair", false, "pair again even though this bridge is already paired")
+	byInstaller := fs.Bool("installer", false, "set by install.sh, which installs the service next")
 	_ = fs.Parse(args)
 
 	cfg, exists, err := config.LoadRaw(*path)
@@ -147,7 +148,11 @@ func cmdSetup(args []string) error {
 	if cfg.Node.ExpectedPubkey == "" {
 		fmt.Println("No node was found yet; the bridge will keep looking on this network.")
 	}
-	fmt.Printf("Start the bridge with: meshbridge run -config %s\n", *path)
+	if *byInstaller {
+		fmt.Println("Installing the service…")
+	} else {
+		fmt.Printf("Start the bridge with: meshbridge run -config %s (or install it as a service: sudo meshbridge install)\n", *path)
+	}
 	return nil
 }
 

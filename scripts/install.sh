@@ -88,6 +88,12 @@ main() {
 	mb="$bin_dir/meshbridge"
 	say "Installed $("$mb" version | head -n 1) to $mb"
 
+	# Releases since v0.4.1 accept -installer (setup then says the service is
+	# installed next, rather than telling you to start the bridge by hand).
+	if "$mb" setup -h 2>&1 | grep -q -- '-installer'; then
+		setup_args="$setup_args -installer"
+	fi
+
 	if $sudo grep -qs '^token = "smb_' "$config"; then
 		say "This bridge is already paired ($config); skipping setup."
 	else
