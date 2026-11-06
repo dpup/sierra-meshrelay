@@ -26,7 +26,8 @@ Why this split:
 | Passphrase invites | Done | Done | n/a |
 | `paused` | Done | Done (`meshbridge pause`/`resume`, local control API) | n/a |
 | Shared repeaters (`gateway/repeaters`) | Done | Done (`meshbridge repeater`) | n/a |
-| Leave, diagnostics | Not yet built | Not started | n/a |
+| Bridge logs (`log`) | Done | Done (`host.send_logs`) | n/a |
+| Leave, diagnostics bundle | Not yet built | Not started | n/a |
 | Client tickets (browser auth) | Not yet built | n/a | Not started |
 | Client relay transport | n/a | `connect` shim done | Not started |
 | Shared Go types (`meshproto`) | Uses them | Uses them | n/a |
@@ -184,6 +185,18 @@ The bridge closes and reopens its connection to the node, then re-runs the ident
 ```
 
 v1 bridges may log this and do nothing else.
+
+### `log` (bridge → relay, optional)
+
+```json
+{ "type": "log", "entries": [ { "seq": 41, "t": "2026-11-06T17:19:11Z", "level": "WARN", "msg": "node not found; scanning the LAN", "attrs": { "addr": "192.168.1.50:5000" } } ], "lost": 2 }
+```
+
+The bridge's recent log lines (Info and above), so SIERRA admins can see why a bridge is stuck without reaching the host's computer. The bridge sends lines logged while it was offline once it connects, and `lost` counts lines it dropped before it could send them.
+
+- Never frame payloads, and never secrets: a bridge redacts attributes named like `token`, `password`, `passphrase`, `secret`, `pin` or `key`.
+- A message stays under 7 KiB. The relay keeps at most 100 entries per message, 120 per minute per session, and the newest 1,000 per gateway, and shows them only to admins (`GET /gateways/<name>/logs`).
+- Hosts can turn it off with `host.send_logs = false`.
 
 ### `error` (either direction)
 

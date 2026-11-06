@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/dpup/sierra-meshrelay/internal/config"
+	"github.com/dpup/sierra-meshrelay/internal/diaglog"
 	"github.com/dpup/sierra-meshrelay/internal/nodelink"
 	"github.com/dpup/sierra-meshrelay/internal/state"
 	"github.com/dpup/sierra-meshrelay/meshproto"
@@ -45,6 +46,10 @@ type Options struct {
 	// State persists what must survive a restart (a pause "until resumed").
 	// Nil keeps it in memory only.
 	State *state.File
+
+	// Diag holds recent log lines to send to the relay (`log` messages), so
+	// SIERRA admins can see why a bridge is stuck. Nil sends none.
+	Diag *diaglog.Ring
 }
 
 func (o *Options) defaults() {
@@ -103,6 +108,7 @@ type Bridge struct {
 	framesFromNode  atomic.Int64
 	droppedFromNode atomic.Int64
 	droppedToNode   atomic.Int64
+	diagSent        atomic.Uint64 // last log seq the relay has
 }
 
 // New creates a Bridge.

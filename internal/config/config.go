@@ -47,6 +47,9 @@ type Node struct {
 // Host configures host-machine behaviour.
 type Host struct {
 	KeepAwake bool `toml:"keep_awake"`
+	// SendLogs sends the bridge's recent log lines (never message content)
+	// to the relay, where SIERRA admins can read them to help.
+	SendLogs bool `toml:"send_logs"`
 }
 
 // Log configures logging.
@@ -63,7 +66,7 @@ func Default() Config {
 	return Config{
 		Relay: DefaultRelay,
 		Node:  Node{Link: LinkAuto, Baud: 115200, TCPPort: 5000},
-		Host:  Host{KeepAwake: true},
+		Host:  Host{KeepAwake: true, SendLogs: true},
 		Log:   Log{Level: "info"},
 	}
 }

@@ -178,6 +178,9 @@ func (b *Bridge) relaySession(ctx context.Context) (res SessionResult) {
 	run(func(ctx context.Context) error { return b.statusLoop(ctx, s, ver) })
 	run(func(ctx context.Context) error { return b.statsLoop(ctx, s) })
 	run(func(ctx context.Context) error { return pingLoop(ctx, s, pingEvery) })
+	if b.opts.Diag != nil {
+		run(func(ctx context.Context) error { return b.logLoop(ctx, s) })
+	}
 
 	<-sctx.Done()
 	err = context.Cause(sctx)
@@ -341,6 +344,40 @@ func (b *Bridge) statsLoop(ctx context.Context, s *session) error {
 			if err := s.writeJSON(msg); err != nil {
 				return err
 			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+// maxLogMsg keeps a log message well under the relay's 8 KiB limit.
+const maxLogMsg = meshproto.MaxControlBytes - 1024
+
+// logLoop sends log lines the relay hasn't had, including those logged while
+// the bridge was offline (the ring holds the last few hundred).
+func (b *Bridge) logLoop(ctx context.Context, s *session) error {
+	for {
+		changed := b.opts.Diag.Changed()
+		entries, lost := b.opts.Diag.Since(b.diagSent.Load())
+		for len(entries) > 0 {
+			msg := meshproto.LogMsg{Type: meshproto.TypeLog, Lost: lost}
+			size := 64
+			for _, e := range entries {
+				eb, _ := json.Marshal(e)
+				if len(msg.Entries) > 0 && size+len(eb)+1 > maxLogMsg {
+					break
+				}
+				msg.Entries = append(msg.Entries, e)
+				size += len(eb) + 1
+			}
+			if err := s.writeJSON(msg); err != nil {
+				return err
+			}
+			b.diagSent.Store(msg.Entries[len(msg.Entries)-1].Seq)
+			entries, lost = entries[len(msg.Entries):], 0
+		}
+		select {
+		case <-changed:
 		case <-ctx.Done():
 			return nil
 		}

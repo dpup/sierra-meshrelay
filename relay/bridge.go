@@ -17,6 +17,7 @@ type bridgeSession struct {
 	gateway string
 	conn    *conn
 	limiter *rateLimiter
+	logs    logBudget
 }
 
 var upgrader = websocket.Upgrader{
@@ -183,6 +184,8 @@ func (r *Relay) bridgeControl(s *bridgeSession, data []byte) {
 		}
 		r.mu.Unlock()
 		r.audit("stats", func(st *Store) error { return st.recordStats(s.gateway, m.Stats, now) })
+	case "log":
+		r.bridgeLog(s, data)
 	case "error":
 		var m errorMsg
 		if json.Unmarshal(data, &m) == nil {

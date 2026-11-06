@@ -57,6 +57,7 @@ func (r *Relay) ServerOptions() []prefab.ServerOption {
 		prefab.WithJSONHandler("POST "+api+"/gateways", j(r.admin(r.apiCreateGateway))),
 		prefab.WithJSONHandler("GET "+api+"/gateways/{name}", j(r.viewer(r.apiGetGateway))),
 		prefab.WithJSONHandler("DELETE "+api+"/gateways/{name}", j(r.admin(r.apiDeleteGateway))),
+		prefab.WithJSONHandler("GET "+api+"/gateways/{name}/logs", j(r.admin(r.apiGatewayLogs))),
 		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/rotate-token", j(r.admin(r.apiRotateToken))),
 		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/accept-pubkey", j(r.admin(r.apiAcceptPubkey))),
 		prefab.WithJSONHandler("POST "+api+"/gateways/{name}/relink", j(r.admin(r.apiRelink))),

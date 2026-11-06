@@ -117,6 +117,7 @@ meshbridge admin pairings                  # codes waiting, with computer, node,
 meshbridge admin approve K7M-4QX           # named after the node; or: approve K7M-4QX jay-murphys
 meshbridge admin invite                    # a passphrase and a ready-to-send message, for hosts you expect
 meshbridge admin gateways                  # what's online
+meshbridge admin logs jay-murphys -f       # a bridge's own log lines, sent to the relay (never messages)
 meshbridge admin repeaters                 # shared repeaters, last read, problems
 ```
 

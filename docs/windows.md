@@ -80,6 +80,8 @@ powercfg /requests                                                    # lists th
 
 `status` needs an elevated PowerShell, because it reads the control secret in the config folder. The log is capped at 5 MB, with the previous one kept as `meshbridge.log.1`.
 
+The bridge sends its recent log lines (never message content, and with secrets redacted) to the relay, where SIERRA admins can read them to help if something goes wrong. To turn that off, set `send_logs = false` under `[host]` in the config and restart the service.
+
 ## Pausing
 
 ```powershell

@@ -259,3 +259,32 @@ func InviteMessage(inv NewInvite) string {
 	b.WriteString("\n")
 	return b.String()
 }
+
+// BridgeLog is one log line a bridge sent the relay.
+type BridgeLog struct {
+	ID         int64             `json:"id"`
+	ReceivedAt time.Time         `json:"received_at"`
+	T          string            `json:"t"`
+	Level      string            `json:"level"`
+	Msg        string            `json:"msg"`
+	Attrs      map[string]string `json:"attrs"`
+}
+
+// GatewayEvent is a relay-side event for a gateway (connected, disconnected…).
+type GatewayEvent struct {
+	At     time.Time `json:"at"`
+	Kind   string    `json:"kind"`
+	Detail string    `json:"detail"`
+}
+
+// Logs returns a gateway's log lines after id `after` (oldest first, at most
+// limit of the newest), and its recent relay-side events (newest first).
+func (c *Client) Logs(ctx context.Context, gateway string, after int64, limit int) ([]BridgeLog, []GatewayEvent, error) {
+	var out struct {
+		Logs   []BridgeLog    `json:"logs"`
+		Events []GatewayEvent `json:"events"`
+	}
+	q := url.Values{"after": {fmt.Sprint(after)}, "limit": {fmt.Sprint(limit)}}
+	err := c.do(ctx, http.MethodGet, "/gateways/"+url.PathEscape(gateway)+"/logs?"+q.Encode(), nil, &out)
+	return out.Logs, out.Events, err
+}

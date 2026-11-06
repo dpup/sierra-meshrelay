@@ -107,6 +107,7 @@ const (
 	TypeLeaseEnding     = "lease_ending"
 	TypeRenew           = "renew"
 	TypeGatewayStatus   = "gateway_status"
+	TypeLog             = "log"
 )
 
 // Envelope is the part every control message shares. Decode into it to route
@@ -218,6 +219,23 @@ type UpdateAvailable struct {
 	URL     string `json:"url"`
 	SHA256  string `json:"sha256"`
 	Sig     string `json:"sig"` // base64 ed25519
+}
+
+// LogEntry is one line of the bridge's log.
+type LogEntry struct {
+	Seq   uint64            `json:"seq"` // increases by 1 per entry while the bridge runs
+	T     string            `json:"t"`   // RFC 3339, the bridge's clock
+	Level string            `json:"level"`
+	Msg   string            `json:"msg"`
+	Attrs map[string]string `json:"attrs,omitempty"`
+}
+
+// LogMsg carries recent bridge log lines to the relay (bridge → relay,
+// optional). Lost counts lines the bridge dropped before it could send them.
+type LogMsg struct {
+	Type    string     `json:"type"`
+	Entries []LogEntry `json:"entries"`
+	Lost    int        `json:"lost,omitempty"`
 }
 
 // Error reports an error (either direction).

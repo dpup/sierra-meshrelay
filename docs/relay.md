@@ -56,6 +56,7 @@ JSON over HTTPS under `/mesh/relay/api/`. Requires an `admin` or `operator` toke
 | `POST /gateways` `{name, expected_pubkey?, notes?}` | Create a gateway. Returns its bridge token **once**. |
 | `GET /gateways` | List with status: online, last seen, agent version, link, node state and pubkey, current lease |
 | `GET /gateways/<name>` | Detail, including recent connect/disconnect events and last `stats` |
+| `GET /gateways/<name>/logs?after=&limit=` | The bridge's recent log lines (`log` messages; newest 1,000 kept) and the relay's events for it. Admins only: they hold LAN addresses and host names. |
 | `POST /gateways/<name>/rotate-token` | New bridge token (returned once). Old one stops working, and the live session is closed with 4001. |
 | `POST /gateways/<name>/accept-pubkey` | Accept the node's current pubkey after a mismatch |
 | `POST /gateways/<name>/relink` | Send `relink` to the bridge |
@@ -83,7 +84,7 @@ A minimal read-only status page (gateways, online/offline, last seen) is a nice-
 - **Notifications:** each redemption or approval adds a `paired` or `repaired` gateway event and logs at warn level with the source IP and host label, so admins can spot one they didn't expect.
 - **`Config.PublicBaseURL`** (default `https://data.sierragridteam.org`) builds the `verification_url` and the `relay` URL handed to a paired bridge.
 - **Not built yet:** the approval page at `/mesh/pair`, which `verification_url` points to. Admins approve with `meshbridge admin` (below) or the API.
-- **`meshbridge admin`** wraps these endpoints for admins: `pairings`, `approve <code> [gateway]`, `deny`, `invite [gateway]` (which prints a message to send the host, with the passphrase and the install one-liner), `invites`, `revoke` and `gateways`. It also covers shared repeaters: `repeaters`, `repeater add <pubkey> <gateway>`, `repeater remove`. It reads the admin token from `$MESHBRIDGE_ADMIN_TOKEN` or `~/.config/meshbridge/admin.token`.
+- **`meshbridge admin`** wraps these endpoints for admins: `pairings`, `approve <code> [gateway]`, `deny`, `invite [gateway]` (which prints a message to send the host, with the passphrase and the install one-liner), `invites`, `revoke` and `gateways`. `logs <gateway> [-n 50] [-f]` prints a bridge's recent log lines merged with the relay's connects and disconnects. It also covers shared repeaters: `repeaters`, `repeater add <pubkey> <gateway>`, `repeater remove`. It reads the admin token from `$MESHBRIDGE_ADMIN_TOKEN` or `~/.config/meshbridge/admin.token`.
 
 ### Shared repeaters (implementation)
 

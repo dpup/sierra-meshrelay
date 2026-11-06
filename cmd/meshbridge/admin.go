@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -26,6 +28,7 @@ Usage:
   meshbridge admin invites                       List invites
   meshbridge admin revoke <invite-id>            Revoke an invite
   meshbridge admin gateways                      Gateways and their status
+  meshbridge admin logs <gateway> [-n 50] [-f]   A bridge's recent log lines and connects/disconnects
   meshbridge admin repeaters                     Shared repeaters and their last reading
   meshbridge admin repeater add <pubkey> <gateway>
                                                  Share a repeater, checking its password through <gateway>
@@ -51,6 +54,8 @@ func cmdAdmin(args []string) error {
 	days := fs.Float64("days", 7, "invite: days until it expires (max 30)")
 	node := fs.String("node", "", "invite: only redeemable by the node with this pubkey")
 	note := fs.String("note", "", "invite: a note for admins")
+	lines := fs.Int("n", 50, "logs: how many lines")
+	follow := fs.Bool("f", false, "logs: keep printing new lines")
 	pos := parseInterleaved(fs, args)
 
 	tok, err := admin.LoadToken(*tokenFile)
@@ -219,6 +224,12 @@ func cmdAdmin(args []string) error {
 		w.Flush()
 		return nil
 
+	case "logs":
+		if arg(0) == "" {
+			return fmt.Errorf("usage: meshbridge admin logs <gateway> [-n 50] [-f]")
+		}
+		return printLogs(ctx, c, arg(0), *lines, *follow)
+
 	case "repeaters":
 		rs, err := c.Repeaters(ctx)
 		if err != nil {
@@ -314,4 +325,85 @@ func ago(t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+// printLogs prints a gateway's log lines merged with the relay's events for
+// it, oldest first; with follow, it then polls for new lines.
+func printLogs(ctx context.Context, c *admin.Client, gw string, n int, follow bool) error {
+	logs, events, err := c.Logs(ctx, gw, 0, n)
+	if err != nil {
+		return err
+	}
+	type line struct {
+		at   time.Time
+		text string
+	}
+	var all []line
+	for _, l := range logs {
+		all = append(all, line{logTime(l), formatLog(l)})
+	}
+	oldest := time.Time{}
+	if len(logs) > 0 && len(logs) >= n {
+		oldest = logTime(logs[0])
+	}
+	for _, e := range events {
+		if e.At.Before(oldest) {
+			continue
+		}
+		text := fmt.Sprintf("%s RELAY %s", e.At.Local().Format("Jan _2 15:04:05"), e.Kind)
+		if e.Detail != "" {
+			text += " " + e.Detail
+		}
+		all = append(all, line{e.At, text})
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
+	if len(all) == 0 {
+		fmt.Printf("Nothing from %s yet. Bridges send their logs from v0.7.0 on, once connected.\n", gw)
+	}
+	for _, l := range all {
+		fmt.Println(l.text)
+	}
+	if !follow {
+		return nil
+	}
+	var last int64
+	if len(logs) > 0 {
+		last = logs[len(logs)-1].ID
+	}
+	for {
+		time.Sleep(3 * time.Second)
+		more, _, err := c.Logs(ctx, gw, last, 500)
+		if err != nil {
+			return err
+		}
+		for _, l := range more {
+			fmt.Println(formatLog(l))
+			last = l.ID
+		}
+	}
+}
+
+func logTime(l admin.BridgeLog) time.Time {
+	if t, err := time.Parse(time.RFC3339Nano, l.T); err == nil {
+		return t
+	}
+	return l.ReceivedAt
+}
+
+func formatLog(l admin.BridgeLog) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %-5s %s", logTime(l).Local().Format("Jan _2 15:04:05"), l.Level, l.Msg)
+	keys := make([]string, 0, len(l.Attrs))
+	for k := range l.Attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := l.Attrs[k]
+		if strings.ContainsAny(v, " \t\"") {
+			v = strconv.Quote(v)
+		}
+		fmt.Fprintf(&b, " %s=%s", k, v)
+	}
+	return b.String()
 }

@@ -26,6 +26,7 @@ var messageTypes = map[string]any{
 	TypeLeaseEnding:     LeaseEnding{},
 	TypeRenew:           Renew{},
 	TypeGatewayStatus:   GatewayStatus{},
+	TypeLog:             LogMsg{},
 }
 
 var jsonBlock = regexp.MustCompile("(?s)```json\n(.*?)```")

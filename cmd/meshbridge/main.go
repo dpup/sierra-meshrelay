@@ -23,6 +23,7 @@ import (
 	"github.com/dpup/sierra-meshrelay/internal/config"
 	"github.com/dpup/sierra-meshrelay/internal/connect"
 	"github.com/dpup/sierra-meshrelay/internal/control"
+	"github.com/dpup/sierra-meshrelay/internal/diaglog"
 	"github.com/dpup/sierra-meshrelay/internal/nodelink"
 	"github.com/dpup/sierra-meshrelay/internal/relayclient"
 	"github.com/dpup/sierra-meshrelay/internal/state"
@@ -122,7 +123,11 @@ func runBridge(ctx context.Context, path string, logJSON bool, controlAddr strin
 	if err != nil {
 		return err
 	}
-	log := newLogger(cfg.Log.Level, logJSON, logOut)
+	var diag *diaglog.Ring
+	if cfg.Host.SendLogs {
+		diag = diaglog.NewRing(diaglog.DefaultSize)
+	}
+	log := newLogger(cfg.Log.Level, logJSON, logOut, diag)
 	if cfg.Host.KeepAwake {
 		keepAwake(ctx, log)
 	}
@@ -141,7 +146,7 @@ func runBridge(ctx context.Context, path string, logJSON bool, controlAddr strin
 	log.Info("meshbridge starting", "version", version, "gateway", cfg.Gateway, "relay", cfg.Relay, "node", detail)
 	b := bridge.New(bridge.Options{
 		Config: cfg, Opener: opener, Log: log, Version: version,
-		LinkKind: meshproto.LinkTCP, LinkDetail: detail, State: st,
+		LinkKind: meshproto.LinkTCP, LinkDetail: detail, State: st, Diag: diag,
 	})
 	if controlAddr != "off" {
 		tok, err := control.LoadOrCreateToken(filepath.Join(dir, control.TokenFile))
@@ -164,7 +169,9 @@ func runBridge(ctx context.Context, path string, logJSON bool, controlAddr strin
 	return nil
 }
 
-func newLogger(level string, asJSON bool, out io.Writer) *slog.Logger {
+// newLogger logs to out at level and, with diag, keeps Info and above for
+// the relay.
+func newLogger(level string, asJSON bool, out io.Writer, diag *diaglog.Ring) *slog.Logger {
 	var lvl slog.Level
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
 		lvl = slog.LevelInfo
@@ -179,10 +186,14 @@ func newLogger(level string, asJSON bool, out io.Writer) *slog.Logger {
 			return a
 		}
 	}
+	var h slog.Handler = slog.NewTextHandler(out, opts)
 	if asJSON {
-		return slog.New(slog.NewJSONHandler(out, opts))
+		h = slog.NewJSONHandler(out, opts)
 	}
-	return slog.New(slog.NewTextHandler(out, opts))
+	if diag != nil {
+		h = diag.Handler(h)
+	}
+	return slog.New(h)
 }
 
 func cmdVersion() {

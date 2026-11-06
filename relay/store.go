@@ -115,7 +115,7 @@ func OpenStore(ctx context.Context, path string, lockTimeout time.Duration) (*St
 	}
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
-	if _, err := db.Exec(schema + repeaterSchema); err != nil {
+	if _, err := db.Exec(schema + repeaterSchema + bridgeLogSchema); err != nil {
 		db.Close()
 		lock.Close()
 		return nil, fmt.Errorf("relay store: migrate: %w", err)
@@ -285,8 +285,10 @@ func (s *Store) DeleteGateway(name string) error {
 	if err := s.execOne(`DELETE FROM gateways WHERE name = ?`, name); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(`DELETE FROM gateway_events WHERE gateway = ?`, name)
-	return err
+	if _, err := s.db.Exec(`DELETE FROM gateway_events WHERE gateway = ?`, name); err != nil {
+		return err
+	}
+	return s.deleteBridgeLogs(name)
 }
 
 func (s *Store) recordHello(name string, h *helloMsg, at time.Time) error {
