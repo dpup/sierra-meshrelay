@@ -1,5 +1,7 @@
-// Package admin is a small client for the relay's admin API (pairings,
-// invites, gateways), behind `meshbridge admin`. It defines its own response
+// Package admin is a small client for the relay's HTTP API: the admin API
+// (pairings, invites, gateways, repeaters) behind `meshbridge admin`, and the
+// bridge self-service API (shared repeaters) behind `meshbridge repeater`,
+// which authenticates with the bridge's own token. It defines its own response
 // types instead of importing the relay package, so the bridge binary stays
 // free of the relay's dependencies.
 package admin
@@ -54,7 +56,8 @@ func LoadToken(file string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// Client calls the admin API at APIBase (https://…/mesh/relay/api).
+// Client calls the relay API at APIBase (https://…/mesh/relay/api) with
+// Token: an admin client token, or a bridge token for the gateway/ routes.
 type Client struct {
 	APIBase string
 	Token   string
@@ -103,7 +106,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&e)
 		if resp.StatusCode == http.StatusUnauthorized && e.Message == "" {
-			e.Message = "the relay didn't accept the admin token"
+			e.Message = "the relay didn't accept the token"
 		}
 		return &APIError{Status: resp.StatusCode, Message: e.Message}
 	}

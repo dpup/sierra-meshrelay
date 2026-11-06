@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -25,6 +26,11 @@ Usage:
   meshbridge admin invites                       List invites
   meshbridge admin revoke <invite-id>            Revoke an invite
   meshbridge admin gateways                      Gateways and their status
+  meshbridge admin repeaters                     Shared repeaters and their last reading
+  meshbridge admin repeater add <pubkey> <gateway>
+                                                 Share a repeater, checking its password through <gateway>
+  meshbridge admin repeater remove <name or pubkey>
+                                                 Stop sharing a repeater (deletes its password)
 
 The admin token comes from $MESHBRIDGE_ADMIN_TOKEN, or from
 ` + "~/.config/meshbridge/admin.token" + ` (chmod 600). Every command takes -relay.
@@ -212,6 +218,55 @@ func cmdAdmin(args []string) error {
 		}
 		w.Flush()
 		return nil
+
+	case "repeaters":
+		rs, err := c.Repeaters(ctx)
+		if err != nil {
+			return err
+		}
+		if len(rs) == 0 {
+			fmt.Println("No shared repeaters.")
+			return nil
+		}
+		printRepeaters(rs, true)
+		return nil
+
+	case "repeater":
+		switch arg(0) {
+		case "add":
+			if arg(1) == "" || arg(2) == "" {
+				return fmt.Errorf("usage: meshbridge admin repeater add <pubkey> <gateway>")
+			}
+			pw, err := readPassword(bufio.NewReader(os.Stdin), "Repeater password (guest if it has one; Enter for none): ")
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Logging in to the repeater through %s over the mesh (this can take up to a minute)…\n", arg(2))
+			res, err := c.AddRepeater(ctx, arg(1), arg(2), pw)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Shared %s (logged in as %s through %s).\n", res.Repeater.Name, res.Check.Access, res.Check.Gateway)
+			return nil
+		case "remove", "rm":
+			if arg(1) == "" {
+				return fmt.Errorf("usage: meshbridge admin repeater remove <name or pubkey>")
+			}
+			rs, err := c.Repeaters(ctx)
+			if err != nil {
+				return err
+			}
+			r, err := pickShared(rs, arg(1))
+			if err != nil {
+				return err
+			}
+			if err := c.RemoveRepeater(ctx, r.Pubkey); err != nil {
+				return err
+			}
+			fmt.Printf("Stopped sharing %s and deleted its password.\n", r.Name)
+			return nil
+		}
+		return fmt.Errorf("usage: meshbridge admin repeater add|remove …")
 	}
 	return fmt.Errorf("unknown admin command %q\n\n%s", sub, adminUsage)
 }

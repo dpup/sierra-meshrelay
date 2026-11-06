@@ -25,6 +25,7 @@ Why this split:
 | Pairing (device code) | Done (admin API; no approval page yet) | Done (`meshbridge setup`) | n/a |
 | Passphrase invites | Done | Done | n/a |
 | `paused` | Done | Done (`meshbridge pause`/`resume`, local control API) | n/a |
+| Shared repeaters (`gateway/repeaters`) | Done | Done (`meshbridge repeater`) | n/a |
 | Leave, diagnostics | Not yet built | Not started | n/a |
 | Client tickets (browser auth) | Not yet built | n/a | Not started |
 | Client relay transport | n/a | `connect` shim done | Not started |
@@ -350,6 +351,19 @@ On a machine with meshbridge installed, opening this link opens setup with the p
 ## Bridge self-service (HTTP)
 
 Authenticated with the bridge token: `Authorization: Bearer smb_…`.
+
+### Shared repeaters: `gateway/repeaters`
+
+A host shares a MeshCore repeater with SIERRA by giving its password (preferably the guest one). The relay then logs in to it over the mesh, through this gateway or any other in range, to read its status. Before sharing, the bridge must tell the host that any SIERRA gateway in range may be used to log in to the repeater.
+
+| Method & path | Does |
+|---|---|
+| `GET gateway/repeaters/nearby` | The repeaters in this gateway's node's contacts: `{repeaters: [{pubkey, name, last_advert, shared}]}`. Takes a short lease on the node; 409 if it's busy or paused. |
+| `POST gateway/repeaters` `{pubkey, password, name?}` | Log in to the repeater through this gateway's node, read its status, and if that works, store the password. Answers `{repeater, check: {name, access, status, telemetry, gateway}}`. 403 for a wrong password, 504 if the repeater doesn't answer, 409 if the node is busy or paused or another gateway already shared it, 503 if the relay can't store passwords. Can take up to a minute. |
+| `GET gateway/repeaters` | The repeaters this gateway shared (never the password) |
+| `DELETE gateway/repeaters/<pubkey>` | Stop sharing one this gateway shared; the password is deleted |
+
+`access` is `guest` or `admin`: what the password logged in as. The node's contacts are left as they were: a repeater added as a contact for the check is removed after.
 
 ### `POST gateway/leave`
 

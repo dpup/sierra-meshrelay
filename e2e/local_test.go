@@ -39,6 +39,7 @@ type localRelay struct {
 	base   string // http://127.0.0.1:port
 	admin  string
 	server *prefab.Server
+	relay  *relay.Relay
 }
 
 func startRelay(t *testing.T, tune ...func(*relay.Config)) *localRelay {
@@ -67,7 +68,7 @@ func startRelay(t *testing.T, tune ...func(*relay.Config)) *localRelay {
 	r := relay.New(ctx, cfg, st)
 	server := prefab.New(prefab.WithContext(ctx), prefab.WithHost("127.0.0.1"), prefab.WithPort(port), prefab.WithPlugin(r))
 	go func() { _ = server.Start() }()
-	lr := &localRelay{t: t, base: fmt.Sprintf("http://127.0.0.1:%d", port), admin: admin, server: server}
+	lr := &localRelay{t: t, base: fmt.Sprintf("http://127.0.0.1:%d", port), admin: admin, server: server, relay: r}
 	t.Cleanup(func() { _ = server.Shutdown(); st.Close() })
 	deadline := time.Now().Add(5 * time.Second)
 	for {

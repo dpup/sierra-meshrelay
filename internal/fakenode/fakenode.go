@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 
 	"github.com/dpup/sierra-meshrelay/internal/companion"
+	"github.com/dpup/sierra-meshrelay/meshops/meshsim"
 )
 
 // EchoPrefix is prepended to echoed frames.
@@ -29,6 +30,9 @@ type Options struct {
 	FW     string // default "v1.18.0"
 	// Silent nodes never answer APP_START (to test identity timeouts).
 	Silent bool
+	// Mesh, when set, answers the contact, clock and repeater commands it
+	// simulates (meshsim) instead of echoing them.
+	Mesh *meshsim.Node
 }
 
 // Node is a running fake node.
@@ -169,6 +173,9 @@ func (n *Node) serve(c net.Conn) {
 			}
 			reply = n.DeviceInfo()
 		default:
+			if n.opts.Mesh != nil && n.opts.Mesh.Handle(f, func(p []byte) { _ = write(p) }) {
+				continue
+			}
 			reply = append([]byte{EchoPrefix}, f...)
 		}
 		if err := write(reply); err != nil {

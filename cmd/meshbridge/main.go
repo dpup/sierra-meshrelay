@@ -42,6 +42,8 @@ Usage:
   meshbridge pause [1h|tomorrow|until-resumed]
                                   Stop sharing the node (default 1h)
   meshbridge resume               Start sharing again
+  meshbridge repeater add|list|remove
+                                  Share your repeaters with SIERRA
   meshbridge install              Install as a service (systemd or Windows; needs sudo or an admin)
   meshbridge uninstall            Stop and remove the service (keeps the config)
   meshbridge find-node [-host addr]
@@ -72,6 +74,8 @@ func main() {
 		err = cmdResume(os.Args[2:])
 	case "connect":
 		err = cmdConnect(os.Args[2:])
+	case "repeater", "repeaters":
+		err = cmdRepeater(os.Args[2:])
 	case "admin":
 		err = cmdAdmin(os.Args[2:])
 	case "install":

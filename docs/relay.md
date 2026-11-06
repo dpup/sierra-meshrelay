@@ -67,6 +67,9 @@ JSON over HTTPS under `/mesh/relay/api/`. Requires an `admin` or `operator` toke
 | `POST /pairings/<code>/deny` | Refuse a code; the bridge's next poll reads `denied` |
 | `POST /invites` `{gateway? \| name_prefix?, max_uses?, expires_in_hours? \| expires_at?, expected_pubkey?, note?}` | Create a passphrase invite. Returns the passphrase and a `sierramesh://` link **once**. `gateway` names it (single use). `name_prefix` names gateways `<prefix>-1`, `-2`… (up to 100 uses). With neither, each gateway is named after its node when redeemed. Expires in 7 days by default, 30 at most. |
 | `GET /invites` / `DELETE /invites/<id>` | List invites (never the passphrase) / revoke one. Revoking doesn't touch gateways already created from it. |
+| `GET /repeaters` | Shared repeaters (never a password): name, access (`guest`/`admin`), who shared it, last successful read, the gateway it came through, the last problem |
+| `POST /repeaters` `{pubkey, gateway, password, name?}` | Share a repeater. The relay logs in to it through `gateway`'s node and reads its status first; the password is stored only if that works. |
+| `DELETE /repeaters/<pubkey>` | Stop sharing a repeater and delete its password |
 
 A minimal read-only status page (gateways, online/offline, last seen) is a nice-to-have and is useful during the pilot.
 
@@ -80,7 +83,18 @@ A minimal read-only status page (gateways, online/offline, last seen) is a nice-
 - **Notifications:** each redemption or approval adds a `paired` or `repaired` gateway event and logs at warn level with the source IP and host label, so admins can spot one they didn't expect.
 - **`Config.PublicBaseURL`** (default `https://data.sierragridteam.org`) builds the `verification_url` and the `relay` URL handed to a paired bridge.
 - **Not built yet:** the approval page at `/mesh/pair`, which `verification_url` points to. Admins approve with `meshbridge admin` (below) or the API.
-- **`meshbridge admin`** wraps these endpoints for admins: `pairings`, `approve <code> [gateway]`, `deny`, `invite [gateway]` (which prints a message to send the host, with the passphrase and the install one-liner), `invites`, `revoke` and `gateways`. It reads the admin token from `$MESHBRIDGE_ADMIN_TOKEN` or `~/.config/meshbridge/admin.token`.
+- **`meshbridge admin`** wraps these endpoints for admins: `pairings`, `approve <code> [gateway]`, `deny`, `invite [gateway]` (which prints a message to send the host, with the passphrase and the install one-liner), `invites`, `revoke` and `gateways`. It also covers shared repeaters: `repeaters`, `repeater add <pubkey> <gateway>`, `repeater remove`. It reads the admin token from `$MESHBRIDGE_ADMIN_TOKEN` or `~/.config/meshbridge/admin.token`.
+
+### Shared repeaters (implementation)
+
+A host shares a repeater with SIERRA so the relay can log in to it over the mesh and read its status (battery, airtime, packet counts, temperature). Hosts use `meshbridge repeater add|list|remove`, which calls the bridge self-service routes in [PROTOCOL.md](../PROTOCOL.md#bridge-self-service-http) with the bridge's own token. Admins use `meshbridge admin repeaters` and `admin repeater add|remove`.
+
+- **Checked before stored.** Sharing takes a lease on the gateway's node at normal priority (so it waits for nobody and yields to nobody), logs in, and reads the status. A wrong password, a repeater that doesn't answer, or a busy or paused node is reported and nothing is stored.
+- **Host's node left as it was.** If the node doesn't have the repeater as a contact, it's added for the check and removed after. The node's clock is set if it's more than 5 minutes off, as every companion app does, because a repeater refuses a login whose timestamp isn't newer than the last one from that node.
+- **Passwords** are sealed with AES-256-GCM under `Config.SecretKey` (sierra-data: `PF__MESH_RELAY__SECRET_KEY`, 32 bytes base64), with the repeater's pubkey as additional data. No API returns them; only `Relay.RepeaterCredentials`, for the in-process poller, opens them. Without the key, sharing answers 503.
+- **Ownership.** The gateway that shared a repeater, or an admin, can remove it. Another gateway can't overwrite or remove it. Removing deletes the password.
+- **Hosts are warned** that any SIERRA gateway in range may be used to log in, and are asked for the guest password first (a guest can read status; MeshCore repeaters answer `GET_STATUS` to guests).
+- **Package `meshops`** holds the companion operations (contacts, login, status, telemetry, clock), usable over any transport; `meshops/meshsim` is a fake node with repeaters for tests. `Relay.Use` runs them under a lease, and `Relay.CheckRepeater` is the whole check.
 
 ### Pause (implementation)
 
@@ -169,6 +183,7 @@ These apply wherever the relay runs.
 - **Route `/mesh/relay` and `/mesh/relay/*` to the relay** at the reverse proxy, without stripping the prefix. The proxy must support WebSocket upgrades and have an idle timeout well over the 25 s ping interval.
 - **Set `meshRelay.clientIpHeader`** to the header your proxy uses to pass the client IP. `X-Forwarded-For` (rightmost entry) is the image default.
 - **Health endpoint:** `/mesh/relay/healthz`.
+- **Set `PF__MESH_RELAY__SECRET_KEY`** (32 random bytes, base64: `openssl rand -base64 32`) to turn on shared repeaters. Keep it stable: a new key makes every stored repeater password unreadable, and they must be shared again.
 - **Commit at least one admin hash** to `meshRelay.admins` (`make relay-token NAME=<you>`) before the first deploy. Then create gateways with `POST /mesh/relay/api/gateways` and hand each bridge token to its host.
 
 `make ecs-deploy` always builds and pushes both images, then waits for the AWS

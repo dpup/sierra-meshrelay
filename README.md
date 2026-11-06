@@ -90,6 +90,16 @@ These talk to the running bridge's control API on `127.0.0.1:8737`, authenticate
 
 `./bin/meshbridge find-node -host 192.168.1.50` runs the identity check against a TCP node and prints its name, pubkey, model and firmware. Use that pubkey as `node.expected_pubkey`.
 
+### Sharing repeaters
+
+```sh
+sudo meshbridge repeater add          # pick a repeater your node has heard, enter its (guest) password
+sudo meshbridge repeater list         # what this bridge shared, and when SIERRA last read each one
+sudo meshbridge repeater remove "Ridge RPT"
+```
+
+SIERRA logs in to a shared repeater over the mesh to read its status for the Grid. Any SIERRA gateway in range may be used, not only yours, and `add` says so before asking. The password is checked live before it's stored, encrypted, on the relay.
+
 ### Using a remote gateway (client mode)
 
 ```sh
@@ -107,6 +117,7 @@ meshbridge admin pairings                  # codes waiting, with computer, node,
 meshbridge admin approve K7M-4QX           # named after the node; or: approve K7M-4QX jay-murphys
 meshbridge admin invite                    # a passphrase and a ready-to-send message, for hosts you expect
 meshbridge admin gateways                  # what's online
+meshbridge admin repeaters                 # shared repeaters, last read, problems
 ```
 
 ### A local relay

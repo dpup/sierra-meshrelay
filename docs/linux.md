@@ -80,6 +80,16 @@ sudo meshbridge resume
 
 Pausing frees the node's single connection, so you can use your own MeshCore app. SIERRA clients are told the gateway is paused until the time you gave. A pause with `until-resumed` survives restarts and reboots; a timed pause doesn't.
 
+## Sharing a repeater
+
+```sh
+sudo meshbridge repeater add       # lists the repeaters your node has heard; pick one and enter its password
+sudo meshbridge repeater list
+sudo meshbridge repeater remove "Ridge RPT"
+```
+
+SIERRA then logs in to the repeater over the mesh to read its status (battery, airtime, packet counts) for the Grid. Any SIERRA gateway in range may be used, not only yours. Give the guest password if the repeater has one: a guest can only read status. The relay checks the password by logging in before it stores it (encrypted). Removing a repeater deletes its password from SIERRA.
+
 ## When the node's address changes
 
 The node gets its address from your router by DHCP. If that address changes, the bridge tries, in order:

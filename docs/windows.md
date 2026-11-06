@@ -89,6 +89,16 @@ meshbridge resume
 
 Pausing frees the node's single connection, so you can use your own MeshCore app. See [linux.md](linux.md#pausing) for how pauses behave.
 
+## Sharing a repeater
+
+```powershell
+meshbridge repeater add       # lists the repeaters your node has heard; pick one and enter its password
+meshbridge repeater list
+meshbridge repeater remove "Ridge RPT"
+```
+
+SIERRA then logs in to the repeater over the mesh to read its status (battery, airtime, packet counts) for the Grid. Any SIERRA gateway in range may be used, not only yours. Give the guest password if the repeater has one: a guest can only read status. The relay checks the password by logging in before it stores it (encrypted). Removing a repeater deletes its password from SIERRA.
+
 ## Upgrading
 
 Run the installer again. Or download the new release and run `.\meshbridge.exe install` from it, which stops the service, replaces the binary and starts it.
