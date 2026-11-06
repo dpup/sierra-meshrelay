@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dpup/prefab/logging"
@@ -25,6 +26,9 @@ import (
 type Store struct {
 	db   *sql.DB
 	lock *os.File
+
+	attemptMu     sync.Mutex
+	attemptPruned time.Time // last prune of repeater_attempts
 }
 
 // ErrNotFound is returned when a gateway or client does not exist.
@@ -115,7 +119,7 @@ func OpenStore(ctx context.Context, path string, lockTimeout time.Duration) (*St
 	}
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
-	if _, err := db.Exec(schema + repeaterSchema + bridgeLogSchema + settingsSchema); err != nil {
+	if _, err := db.Exec(schema + repeaterSchema + repeaterPollSchema + bridgeLogSchema + settingsSchema); err != nil {
 		db.Close()
 		lock.Close()
 		return nil, fmt.Errorf("relay store: migrate: %w", err)

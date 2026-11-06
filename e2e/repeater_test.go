@@ -238,3 +238,92 @@ func TestCheckRepeaterResetsStalePath(t *testing.T) {
 		t.Fatalf("unreachable: %v", err)
 	}
 }
+
+// TestRepeaterAttemptsAndPollState: every check is recorded as an attempt;
+// admins see each gateway's link and the poller's saved schedule, which the
+// credentials carry back; FloodFirst floods at once; removing the repeater
+// forgets both.
+func TestRepeaterAttemptsAndPollState(t *testing.T) {
+	lr := startRelay(t, withSecretKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	rpt := &meshsim.Repeater{Pubkey: hexKey("f"), Name: "Knob", GuestPassword: "g", BatteryMV: 3800}
+	mesh := meshsim.New(rpt)
+	tok := lr.createGateway("knob-gw")
+	startBridge(t, lr, "knob-gw", tok, startMeshNode(t, "knob", mesh))
+	lr.waitGateway("knob-gw", "online", connected)
+	host := &admin.Client{APIBase: config.HTTPBase(lr.wsBase()), Token: tok}
+	ac := adminClient(lr)
+
+	if _, err := host.ShareRepeater(ctx, rpt.Pubkey, "", "g"); err != nil {
+		t.Fatal(err)
+	}
+	req := relay.CheckRequest{Gateway: "knob-gw", Client: "telemetry", Priority: relay.PriorityBackground,
+		Pubkey: rpt.Pubkey, Password: "g", OnlyIfKnown: true}
+	// The share's flooded login taught the node a route; FloodFirst resets it.
+	if !mesh.PathKnown(rpt.Pubkey) {
+		t.Fatal("no route learned from the share")
+	}
+	req.FloodFirst = true
+	if res, err := lr.relay.CheckRepeater(ctx, req); err != nil || !res.PathReset {
+		t.Fatalf("flood first: %+v %v", res, err)
+	}
+	req.FloodFirst = false
+	mesh.SetUnreachable(rpt.Pubkey, true)
+	if _, err := lr.relay.CheckRepeater(ctx, req); !errors.Is(err, meshops.ErrNoMeshReply) {
+		t.Fatalf("unreachable: %v", err)
+	}
+	next := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
+	lr.relay.SetRepeaterPollState(rpt.Pubkey, relay.RepeaterPollState{Primary: "knob-gw", NextCycle: next, FailedCycles: 1})
+
+	// Writes are queued: wait for them.
+	var rep admin.Repeater
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rs, err := ac.Repeaters(ctx)
+		if err == nil && len(rs) == 1 && rs[0].Poll != nil && len(rs[0].Links) == 1 && rs[0].Links[0].Tries == 3 {
+			rep = rs[0]
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("attempts and state never showed: %+v %v", rs, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	l := rep.Links[0]
+	// The share (flooded: no route yet), the flood-first check, and the
+	// failure (its direct try went unanswered, so it reset and flooded too).
+	if l.Gateway != "knob-gw" || l.OK != 2 || l.Flooded != 3 || l.LastOutcome != "no_reply" || l.MedianMS <= 0 {
+		t.Fatalf("link: %+v", l)
+	}
+	if rep.Poll.Primary != "knob-gw" || rep.Poll.FailedCycles != 1 || !rep.Poll.NextCycle.Equal(next) {
+		t.Fatalf("poll state: %+v", rep.Poll)
+	}
+	creds, err := lr.relay.RepeaterCredentials()
+	if err != nil || len(creds) != 1 || creds[0].Poll.Primary != "knob-gw" {
+		t.Fatalf("credentials: %+v %v", creds, err)
+	}
+
+	// The host sees the same in their own list.
+	mine, err := host.MyRepeaters(ctx)
+	if err != nil || len(mine) != 1 || len(mine[0].Links) != 1 || mine[0].Poll == nil {
+		t.Fatalf("host list: %+v %v", mine, err)
+	}
+
+	if err := ac.RemoveRepeater(ctx, rpt.Pubkey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.ShareRepeater(ctx, rpt.Pubkey, "", "g"); err == nil {
+		t.Fatal("unreachable repeater shared")
+	}
+	mesh.SetUnreachable(rpt.Pubkey, false)
+	if _, err := host.ShareRepeater(ctx, rpt.Pubkey, "", "g"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // let queued writes land
+	rs, _ := ac.Repeaters(ctx)
+	// Only the two shares since removal: the failed one and this one.
+	if len(rs) != 1 || rs[0].Poll != nil || len(rs[0].Links) != 1 || rs[0].Links[0].Tries != 2 || rs[0].Links[0].OK != 1 {
+		t.Fatalf("after re-sharing, the old attempts and state should be gone: %+v", rs)
+	}
+}

@@ -59,6 +59,10 @@ type RepeaterRecord struct {
 	LastOKAt       *time.Time `json:"last_ok_at,omitempty"`
 	LastGateway    string     `json:"last_gateway,omitempty"`
 	LastError      string     `json:"last_error,omitempty"`
+	// Filled in by the listing APIs: the poller's schedule, and how each
+	// gateway's checks went over the last 24 hours.
+	Poll  *RepeaterPollState `json:"poll,omitempty"`
+	Links []RepeaterLink     `json:"links,omitempty"`
 
 	sealed []byte
 }
@@ -68,6 +72,8 @@ type RepeaterRecord struct {
 type RepeaterCredential struct {
 	RepeaterRecord
 	Password string `json:"-"`
+	// Poll is the poller's saved schedule (SetRepeaterPollState).
+	Poll RepeaterPollState `json:"-"`
 }
 
 // ErrNoSecretKey means the registry is off: Config.SecretKey isn't set.
@@ -142,7 +148,7 @@ func (s *Store) DeleteRepeater(pubkey string) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return s.deleteRepeaterPolling(pubkey)
 }
 
 // RecordRepeaterPoll notes a poll's outcome: errText "" is a success. The
@@ -216,7 +222,11 @@ func (r *Relay) RepeaterCredentials() ([]RepeaterCredential, error) {
 			logging.Warnw(r.ctx, "repeater password unreadable; skipping it", "repeater", rec.Pubkey, "error", err)
 			continue
 		}
-		out = append(out, RepeaterCredential{RepeaterRecord: *rec, Password: pw})
+		st, err := r.store.RepeaterPollState(rec.Pubkey)
+		if err != nil {
+			logging.Warnw(r.ctx, "repeater poll state unreadable; starting it fresh", "repeater", rec.Pubkey, "error", err)
+		}
+		out = append(out, RepeaterCredential{RepeaterRecord: *rec, Password: pw, Poll: st})
 	}
 	return out, nil
 }
@@ -292,6 +302,10 @@ type CheckRequest struct {
 	// repeater's advert is the best sign it's in range, and the host's
 	// contacts are never touched.
 	OnlyIfKnown bool
+	// FloodFirst resets the node's stored route before logging in, so the
+	// login floods at once: for a link whose direct route just went
+	// unanswered.
+	FloodFirst bool
 }
 
 // ErrNotKnown means the gateway's node doesn't have the repeater as a
@@ -302,9 +316,14 @@ var ErrNotKnown = stderrors.New("the gateway's node hasn't heard this repeater")
 // status and telemetry, under a lease. If the node doesn't have the repeater
 // as a contact, it's added for the check and removed after (unless
 // OnlyIfKnown), so the host's contacts are left as they were.
+//
+// Every check is recorded as an attempt (RepeaterLinks), with the step it
+// stopped at and whether the login flooded.
 func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCheck, error) {
 	res := RepeaterCheck{Gateway: req.Gateway, Name: req.Name}
 	pubkey := req.Pubkey
+	start := r.now()
+	step, pathKnown := "contact", false
 	err := r.Use(ctx, LeaseRequest{Gateway: req.Gateway, Client: req.Client, Role: RoleAgent, Priority: req.Priority},
 		func(ctx context.Context, s *meshops.Session) error {
 			if _, err := s.AppStart(ctx, "sierra-relay"); err != nil {
@@ -326,9 +345,13 @@ func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCh
 			case err != nil:
 				return err
 			default:
+				pathKnown = c.PathKnown
 				if c.Name != "" {
 					res.Name = c.Name
 				}
+			}
+			if req.FloodFirst && pathKnown && s.ResetPath(ctx, pubkey) == nil {
+				res.PathReset, pathKnown = true, false
 			}
 			// A node whose clock went backwards can't log in (replay
 			// protection); companion apps set the clock on connect too.
@@ -353,6 +376,7 @@ func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCh
 					"gateway", req.Gateway, "repeater", pubkey)
 				return true
 			}
+			step = "login"
 			login, err := s.Login(ctx, pubkey, req.Password)
 			if flood(err) {
 				login, err = s.Login(ctx, pubkey, req.Password)
@@ -361,6 +385,7 @@ func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCh
 				return err
 			}
 			res.Access = login.Access()
+			step = "status"
 			st, err := s.Status(ctx, pubkey)
 			if flood(err) {
 				st, err = s.Status(ctx, pubkey)
@@ -375,8 +400,12 @@ func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCh
 			if adv, err := s.ExportContact(ctx, pubkey); err == nil {
 				res.Advert = adv
 			}
+			step = ""
 			return nil
 		})
+	r.recordAttempt(RepeaterAttempt{Pubkey: pubkey, At: start, Gateway: req.Gateway, Client: req.Client,
+		Outcome: attemptOutcome(err), Step: step, Flooded: !pathKnown || res.PathReset, PathReset: res.PathReset,
+		Duration: r.now().Sub(start)})
 	return res, err
 }
 
@@ -559,6 +588,7 @@ func (r *Relay) apiGatewayListRepeaters(_ *http.Request, gw *GatewayRecord) (any
 			mine = append(mine, rec)
 		}
 	}
+	r.withPolling(mine)
 	return map[string]any{"repeaters": mine}, nil
 }
 
@@ -586,7 +616,21 @@ func (r *Relay) apiListRepeaters(_ *http.Request, _ *ClientRecord) (any, error) 
 	if recs == nil {
 		recs = []*RepeaterRecord{}
 	}
+	r.withPolling(recs)
 	return map[string]any{"repeaters": recs}, nil
+}
+
+// withPolling adds each repeater's schedule and last day of links.
+func (r *Relay) withPolling(recs []*RepeaterRecord) {
+	since := r.now().Add(-24 * time.Hour)
+	for _, rec := range recs {
+		if st, err := r.store.RepeaterPollState(rec.Pubkey); err == nil && !st.NextCycle.IsZero() {
+			rec.Poll = &st
+		}
+		if links, err := r.store.RepeaterLinks(rec.Pubkey, since); err == nil && len(links) > 0 {
+			rec.Links = links
+		}
+	}
 }
 
 func (r *Relay) apiAddRepeater(req *http.Request, who *ClientRecord) (any, error) {

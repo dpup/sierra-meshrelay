@@ -22,6 +22,27 @@ type Repeater struct {
 	LastOKAt       *time.Time `json:"last_ok_at"`
 	LastGateway    string     `json:"last_gateway"`
 	LastError      string     `json:"last_error"`
+	Poll           *struct {
+		Primary          string     `json:"primary"`
+		NextCycle        time.Time  `json:"next_cycle"`
+		FailedCycles     int        `json:"failed_cycles"`
+		HibernatingSince *time.Time `json:"hibernating_since"`
+		RefusedAt        *time.Time `json:"refused_at"`
+	} `json:"poll"`
+	// Links is how each gateway's checks went over the last 24 hours.
+	Links []RepeaterLink `json:"links"`
+}
+
+// RepeaterLink is one gateway's checks of a repeater over the last day.
+type RepeaterLink struct {
+	Gateway     string     `json:"gateway"`
+	Tries       int        `json:"tries"`
+	OK          int        `json:"ok"`
+	Flooded     int        `json:"flooded"`
+	MedianMS    int64      `json:"median_ms"`
+	LastOK      *time.Time `json:"last_ok"`
+	LastTry     *time.Time `json:"last_try"`
+	LastOutcome string     `json:"last_outcome"`
 }
 
 // NearbyRepeater is a repeater in the bridge's node's contacts.

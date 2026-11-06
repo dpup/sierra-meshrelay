@@ -265,7 +265,7 @@ func readPassword(in *bufio.Reader, prompt string) (string, error) {
 
 func printRepeaters(rs []admin.Repeater, withOwner bool) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	hdr := "REPEATER\tPUBKEY\tACCESS\tLAST READ\tVIA\tPROBLEM"
+	hdr := "REPEATER\tPUBKEY\tACCESS\tLAST READ\tVIA\tPOLLING\tPROBLEM"
 	if withOwner {
 		hdr += "\tSHARED BY"
 	}
@@ -279,7 +279,8 @@ func printRepeaters(rs []admin.Repeater, withOwner bool) {
 		if r.LastError != "" && (r.LastOKAt == nil || (r.LastAttemptAt != nil && r.LastAttemptAt.After(*r.LastOKAt))) {
 			problem = r.LastError
 		}
-		line := fmt.Sprintf("%s\t%s…\t%s\t%s\t%s\t%s", r.Name, r.Pubkey[:12], r.Access, read, dash(r.LastGateway), problem)
+		line := fmt.Sprintf("%s\t%s…\t%s\t%s\t%s\t%s\t%s", r.Name, r.Pubkey[:12], r.Access, read, dash(r.LastGateway),
+			pollingState(r), problem)
 		if withOwner {
 			by := r.AddedByGateway
 			if by == "" {
@@ -290,4 +291,40 @@ func printRepeaters(rs []admin.Repeater, withOwner bool) {
 		fmt.Fprintln(w, line)
 	}
 	w.Flush()
+	// How each gateway's checks went, for repeaters that have any.
+	for _, r := range rs {
+		if len(r.Links) == 0 {
+			continue
+		}
+		fmt.Printf("\n%s, last 24h:\n", r.Name)
+		lw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+		for _, l := range r.Links {
+			median := "-"
+			if l.MedianMS > 0 {
+				median = fmt.Sprintf("%.1fs", float64(l.MedianMS)/1000)
+			}
+			last := ""
+			if l.LastOutcome != "" {
+				last = "last try: " + strings.ReplaceAll(l.LastOutcome, "_", " ")
+			}
+			fmt.Fprintf(lw, "  via %s\t%d/%d ok\t%d flooded\tmedian %s\t%s\n", l.Gateway, l.OK, l.Tries, l.Flooded, median, last)
+		}
+		lw.Flush()
+	}
+}
+
+// pollingState says how the poller is treating a repeater.
+func pollingState(r admin.Repeater) string {
+	p := r.Poll
+	switch {
+	case p == nil:
+		return "-"
+	case p.RefusedAt != nil:
+		return "stopped (password refused)"
+	case p.HibernatingSince != nil:
+		return "daily (unreachable since " + p.HibernatingSince.Local().Format("Jan 2") + ")"
+	case p.FailedCycles > 0:
+		return fmt.Sprintf("retrying (%d missed)", p.FailedCycles)
+	}
+	return "normal"
 }
