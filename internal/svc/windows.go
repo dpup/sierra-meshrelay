@@ -187,9 +187,17 @@ func start(s *mgr.Service) error {
 	// A bridge that can't read its config exits within a moment.
 	time.Sleep(2 * time.Second)
 	if st, err := s.Query(); err != nil || st.State != wsvc.Running {
-		return errors.New("the service started but stopped again")
+		return fmt.Errorf("the service started but stopped again (%s)", exitText(st))
 	}
 	return nil
+}
+
+// exitText describes why a stopped service stopped.
+func exitText(st wsvc.Status) string {
+	if st.Win32ExitCode == uint32(windows.ERROR_SERVICE_SPECIFIC_ERROR) {
+		return fmt.Sprintf("meshbridge exit code %d", st.ServiceSpecificExitCode)
+	}
+	return fmt.Sprintf("Windows error %d: %v", st.Win32ExitCode, syscall.Errno(st.Win32ExitCode))
 }
 
 func waitFor(s *mgr.Service, want wsvc.State, timeout time.Duration) error {
@@ -202,8 +210,11 @@ func waitFor(s *mgr.Service, want wsvc.State, timeout time.Duration) error {
 		if st.State == want {
 			return nil
 		}
+		if want == wsvc.Running && st.State == wsvc.Stopped {
+			return fmt.Errorf("the service stopped while starting (%s)", exitText(st))
+		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the service didn't reach state %d within %s (it is in state %d)", want, timeout, st.State)
+			return fmt.Errorf("the service didn't reach state %d within %s (it is in state %d, %s)", want, timeout, st.State, exitText(st))
 		}
 		time.Sleep(250 * time.Millisecond)
 	}

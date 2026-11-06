@@ -220,6 +220,15 @@ func TestWindowsService(t *testing.T) {
 	installed := filepath.Join(os.Getenv("ProgramFiles"), "SIERRA", "meshbridge", "meshbridge.exe")
 	t.Cleanup(func() { _ = exec.Command(installed, "uninstall").Run() })
 
+	t.Cleanup(func() {
+		if t.Failed() {
+			logData, err := os.ReadFile(filepath.Join(filepath.Dir(env.config()), "meshbridge.log"))
+			t.Logf("service log (%v):\n%s", err, logData)
+			ev, _ := powershell(t, "Get-WinEvent -LogName System -MaxEvents 15 | Where-Object ProviderName -eq 'Service Control Manager' | Format-List TimeCreated,Id,Message")
+			t.Logf("service manager events:\n%s", ev)
+		}
+	})
+
 	out, err := env.run("-Relay", psQuote(lr.wsBase()), "-Passphrase", psQuote(strings.ReplaceAll(phrase, "-", " ")),
 		"-NodeHost", "127.0.0.1", "-Port", strconv.Itoa(node.Addr().Port))
 	if err != nil {
