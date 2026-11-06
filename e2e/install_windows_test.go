@@ -226,6 +226,9 @@ func TestWindowsService(t *testing.T) {
 			t.Logf("service log (%v):\n%s", err, logData)
 			ev, _ := powershell(t, "Get-WinEvent -LogName System -MaxEvents 15 | Where-Object ProviderName -eq 'Service Control Manager' | Format-List TimeCreated,Id,Message")
 			t.Logf("service manager events:\n%s", ev)
+			acl, _ := exec.Command("icacls", filepath.Dir(env.config())).CombinedOutput()
+			files, _ := exec.Command("icacls", filepath.Join(filepath.Dir(env.config()), "*")).CombinedOutput()
+			t.Logf("config folder ACL:\n%s\n%s", acl, files)
 		}
 	})
 

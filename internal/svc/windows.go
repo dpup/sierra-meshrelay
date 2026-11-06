@@ -152,11 +152,27 @@ func SecureConfigDir(dir string) error {
 		}
 		m.Disconnect()
 	}
-	cmd := exec.Command("icacls", icaclsArgs(dir, withService)...)
+	if err := icacls(icaclsArgs(dir, withService)); err != nil {
+		return fmt.Errorf("restricting access to %s: %w", dir, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := icacls(resetArgs(filepath.Join(dir, e.Name()))); err != nil {
+			return fmt.Errorf("restricting access to %s: %w", filepath.Join(dir, e.Name()), err)
+		}
+	}
+	return nil
+}
+
+func icacls(args []string) error {
+	cmd := exec.Command("icacls", args...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("restricting access to %s: %w: %s", dir, err, strings.TrimSpace(out.String()))
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(out.String()))
 	}
 	return nil
 }

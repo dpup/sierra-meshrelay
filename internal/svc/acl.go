@@ -19,19 +19,23 @@ const (
 	sidEveryone           = "*S-1-1-0"
 )
 
-// icaclsArgs locks dir (and everything in it) to SYSTEM and Administrators,
-// plus the service account when it exists. The config holds the bridge's
-// token, and ProgramData lets every local user read what is created there.
+// icaclsArgs locks dir to SYSTEM and Administrators, plus the service
+// account when it exists. The config holds the bridge's token, and
+// ProgramData lets every local user read what is created there.
 //
 // /inheritance:r drops what the folder inherited from ProgramData, the
 // grants replace whatever was granted explicitly, and the removals catch
-// explicit grants to the broad groups. (OI)(CI) makes new files (state.json,
-// the control secret, the log) inherit the same ACL.
+// explicit grants to the broad groups. (OI)(CI) makes what is created in it
+// (state.json, the control secret, the log) inherit the same ACL; files
+// already there are reset to inherit it (resetArgs).
 func icaclsArgs(dir string, withService bool) []string {
 	args := []string{dir, "/inheritance:r",
 		"/grant:r", sidSystem + ":(OI)(CI)F", sidAdministrators + ":(OI)(CI)F"}
 	if withService {
 		args = append(args, ServiceAccount+":(OI)(CI)M")
 	}
-	return append(args, "/remove:g", sidUsers, sidAuthenticatedUsers, sidCreatorOwner, sidEveryone, "/T", "/C", "/Q")
+	return append(args, "/remove:g", sidUsers, sidAuthenticatedUsers, sidCreatorOwner, sidEveryone, "/Q")
 }
+
+// resetArgs makes an existing file take exactly the folder's ACL.
+func resetArgs(file string) []string { return []string{file, "/reset", "/Q"} }
