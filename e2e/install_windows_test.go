@@ -100,6 +100,14 @@ func powershell(t *testing.T, script string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
 	cmd.Stdin = strings.NewReader("")
+	// Started from PowerShell 7 (as CI's steps are), PSModulePath points at
+	// 7's modules, which Windows PowerShell can't load. A user's session
+	// doesn't have that.
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(strings.ToUpper(kv), "PSMODULEPATH=") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

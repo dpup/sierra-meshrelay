@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -70,8 +71,10 @@ func TestTokenFile(t *testing.T) {
 	if err != nil || len(tok) < 40 {
 		t.Fatalf("token %q, %v", tok, err)
 	}
+	// Windows has no file modes; there the config folder's ACL protects it
+	// (svc.SecureConfigDir).
 	fi, err := os.Stat(path)
-	if err != nil || fi.Mode().Perm() != 0o600 {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Fatalf("token file mode %v, %v", fi.Mode().Perm(), err)
 	}
 	again, _ := control.LoadOrCreateToken(path)

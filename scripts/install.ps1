@@ -79,9 +79,14 @@ function Install-MeshBridge {
 			if ($f.Count -ge 2 -and $f[1] -eq $asset) { $want = $f[0].ToLower() }
 		}
 		if (-not $want) { throw "no checksum for $asset in SHA256SUMS" }
-		$got = (Get-FileHash -Algorithm SHA256 (Join-Path $tmp $asset)).Hash.ToLower()
+		# .NET rather than Get-FileHash and Expand-Archive, which live in
+		# modules that may not load (e.g. when started from PowerShell 7).
+		$sha = [Security.Cryptography.SHA256]::Create()
+		$fs = [IO.File]::OpenRead((Join-Path $tmp $asset))
+		try { $got = ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace "-", "").ToLower() } finally { $fs.Dispose() }
 		if ($got -ne $want) { throw "checksum mismatch for $asset (got $got, want $want); not installing" }
-		Expand-Archive -Path (Join-Path $tmp $asset) -DestinationPath (Join-Path $tmp "x")
+		Add-Type -AssemblyName System.IO.Compression.FileSystem
+		[IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $tmp $asset), (Join-Path $tmp "x"))
 
 		# Windows won't replace a running binary, so stop the service first.
 		$svc = Get-Service -Name meshbridge -ErrorAction SilentlyContinue

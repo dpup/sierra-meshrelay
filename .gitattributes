@@ -1,0 +1,3 @@
+# Keep LF everywhere: tests parse PROTOCOL.md examples, and the scripts
+# are served raw from GitHub.
+* text=auto eol=lf
