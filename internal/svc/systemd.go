@@ -1,5 +1,5 @@
-// Package svc installs meshbridge as an OS service. Linux (systemd) for now;
-// Windows and macOS come with their installers.
+//go:build !windows
+
 package svc
 
 import (
@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -105,20 +104,6 @@ func (s *Systemd) run(name string, args ...string) error {
 	cmd.Stdout, cmd.Stderr = s.out(), &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
-}
-
-// Supported reports whether this host can install the service, and why not.
-func Supported() error {
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("installing as a service isn't supported on %s yet; run `meshbridge run` instead", runtime.GOOS)
-	}
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return errors.New("systemd (systemctl) not found; run `meshbridge run` under your own supervisor instead")
-	}
-	if os.Geteuid() != 0 {
-		return errors.New("installing the service needs root: run it with sudo")
 	}
 	return nil
 }

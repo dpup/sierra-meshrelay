@@ -60,6 +60,14 @@ curl -fsSL https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/
 
 That downloads and verifies the latest release, pairs with SIERRA, and installs the systemd service. See [docs/linux.md](docs/linux.md) for options, upgrades and troubleshooting.
 
+On Windows 10 or 11, from an elevated PowerShell (or over SSH as an administrator):
+
+```powershell
+irm https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.ps1 | iex
+```
+
+That does the same and installs a Windows service. See [docs/windows.md](docs/windows.md).
+
 From source:
 
 ```sh

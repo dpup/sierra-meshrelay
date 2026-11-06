@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -41,7 +42,7 @@ Usage:
   meshbridge pause [1h|tomorrow|until-resumed]
                                   Stop sharing the node (default 1h)
   meshbridge resume               Start sharing again
-  meshbridge install              Install as a system service (systemd; needs sudo)
+  meshbridge install              Install as a service (systemd or Windows; needs sudo or an admin)
   meshbridge uninstall            Stop and remove the service (keeps the config)
   meshbridge find-node [-host addr]
                                   Find nodes on this network and print their identity
@@ -100,16 +101,29 @@ func cmdRun(args []string) error {
 	controlAddr := fs.String("control", control.DefaultAddr, `local control API address ("off" to disable)`)
 	_ = fs.Parse(args)
 
-	cfg, err := config.Load(*path)
+	if underServiceManager() {
+		// Windows: the service has no console, so it logs to a file beside
+		// its config, and stops when the service manager says so.
+		return runAsService(filepath.Dir(*path), func(ctx context.Context, logOut io.Writer) error {
+			return runBridge(ctx, *path, *logJSON, *controlAddr, logOut)
+		})
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runBridge(ctx, *path, *logJSON, *controlAddr, os.Stderr)
+}
+
+func runBridge(ctx context.Context, path string, logJSON bool, controlAddr string, logOut io.Writer) error {
+	cfg, err := config.Load(path)
 	if err != nil {
 		return err
 	}
-	log := newLogger(cfg.Log.Level, *logJSON)
+	log := newLogger(cfg.Log.Level, logJSON, logOut)
+	if cfg.Host.KeepAwake {
+		keepAwake(ctx, log)
+	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	dir := filepath.Dir(*path)
+	dir := filepath.Dir(path)
 	st := state.New(filepath.Join(dir, "state.json"))
 	// A WiFi node's DHCP address can change: Discover tries the configured
 	// address, then the last one that worked, then scans the LAN for the
@@ -125,18 +139,18 @@ func cmdRun(args []string) error {
 		Config: cfg, Opener: opener, Log: log, Version: version,
 		LinkKind: meshproto.LinkTCP, LinkDetail: detail, State: st,
 	})
-	if *controlAddr != "off" {
+	if controlAddr != "off" {
 		tok, err := control.LoadOrCreateToken(filepath.Join(dir, control.TokenFile))
 		if err != nil {
 			log.Warn("control API disabled: can't create its secret", "error", err)
 		} else {
 			srv := &control.Server{Bridge: b, Token: tok, Gateway: cfg.Gateway, Version: version}
 			go func() {
-				if err := srv.ListenAndServe(ctx, *controlAddr); err != nil {
-					log.Warn("control API stopped", "addr", *controlAddr, "error", err)
+				if err := srv.ListenAndServe(ctx, controlAddr); err != nil {
+					log.Warn("control API stopped", "addr", controlAddr, "error", err)
 				}
 			}()
-			log.Info("control API listening", "addr", *controlAddr)
+			log.Info("control API listening", "addr", controlAddr)
 		}
 	}
 	if err := b.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -146,7 +160,7 @@ func cmdRun(args []string) error {
 	return nil
 }
 
-func newLogger(level string, asJSON bool) *slog.Logger {
+func newLogger(level string, asJSON bool, out io.Writer) *slog.Logger {
 	var lvl slog.Level
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
 		lvl = slog.LevelInfo
@@ -162,9 +176,9 @@ func newLogger(level string, asJSON bool) *slog.Logger {
 		}
 	}
 	if asJSON {
-		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
+		return slog.New(slog.NewJSONHandler(out, opts))
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, opts))
+	return slog.New(slog.NewTextHandler(out, opts))
 }
 
 func cmdVersion() {

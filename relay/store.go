@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/dpup/prefab/logging"
@@ -141,11 +140,11 @@ func acquireLock(ctx context.Context, path string, timeout time.Duration) (*os.F
 	deadline := time.Now().Add(timeout)
 	announced := false
 	for {
-		lockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		held, lockErr := tryLock(f)
 		if lockErr == nil {
 			return f, nil
 		}
-		if !errors.Is(lockErr, syscall.EWOULDBLOCK) || !time.Now().Before(deadline) {
+		if !held || !time.Now().Before(deadline) {
 			f.Close()
 			return nil, fmt.Errorf("relay store: %s still locked by another process after %s "+
 				"(on a deploy, the previous relay task has not exited): %w", path, timeout, lockErr)

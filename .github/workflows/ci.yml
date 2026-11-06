@@ -22,3 +22,19 @@ jobs:
         run: make test
       - name: Cross-compile the bridge for every release target
         run: make cross
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test (unit and local end-to-end)
+        run: go test ./...
+      - name: Install script and Windows service, end to end
+        env:
+          MESHBRIDGE_WINDOWS_SERVICE_TEST: "1"
+        run: go test -count=1 -v -run Windows ./e2e/

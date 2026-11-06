@@ -62,7 +62,7 @@ func cmdSetup(args []string) error {
 	host := fs.String("host", "", "your node's address on this network (WiFi/Ethernet nodes)")
 	port := fs.Int("port", 5000, "your node's TCP port")
 	repair := fs.Bool("repair", false, "pair again even though this bridge is already paired")
-	byInstaller := fs.Bool("installer", false, "set by install.sh, which installs the service next")
+	byInstaller := fs.Bool("installer", false, "set by the installer script, which installs the service next")
 	_ = fs.Parse(args)
 
 	cfg, exists, err := config.LoadRaw(*path)
@@ -141,6 +141,13 @@ func cmdSetup(args []string) error {
 	if res.ExpectedPubkey != "" {
 		cfg.Node.ExpectedPubkey = res.ExpectedPubkey
 	}
+	// Lock the folder down before the token is written into it (Windows;
+	// elsewhere the file is written 0600).
+	if err := os.MkdirAll(filepath.Dir(*path), 0o755); err == nil {
+		if err := svc.SecureConfigDir(filepath.Dir(*path)); err != nil {
+			return fmt.Errorf("paired as %q, but couldn't protect the config folder, so the token wasn't saved: %w", res.Gateway, err)
+		}
+	}
 	if err := config.Save(*path, cfg); err != nil {
 		return fmt.Errorf("paired as %q, but couldn't save the config to %s: %w", res.Gateway, *path, err)
 	}
@@ -151,7 +158,7 @@ func cmdSetup(args []string) error {
 	if *byInstaller {
 		fmt.Println("Installing the service…")
 	} else {
-		fmt.Printf("Start the bridge with: meshbridge run -config %s (or install it as a service: sudo meshbridge install)\n", *path)
+		fmt.Printf("Start the bridge with: meshbridge run -config %s (or install it as a service: %s)\n", *path, installHint)
 	}
 	return nil
 }
@@ -323,19 +330,21 @@ func cmdInstall(args []string) error {
 		return err
 	}
 	if _, err := config.Load(abs); err != nil {
-		return fmt.Errorf("%w\nPair this bridge first with: sudo meshbridge setup", err)
+		return fmt.Errorf("%w\nPair this bridge first with: %s", err, setupHint)
 	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	if err := (&svc.Systemd{}).Install(exe, abs); err != nil {
+	inst, err := svc.Install(exe, abs)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("Installed and started the meshbridge service (%s, config %s).\n", svc.BinaryPath, abs)
+	fmt.Printf("Installed and started the meshbridge service (%s, config %s).\n", inst.Binary, abs)
 	fmt.Println("It starts at boot and restarts if it stops. Check on it with:")
-	fmt.Println("  sudo meshbridge status")
-	fmt.Println("  journalctl -u meshbridge -f")
+	for _, c := range inst.CheckOn {
+		fmt.Println("  " + c)
+	}
 	return nil
 }
 
@@ -345,7 +354,7 @@ func cmdUninstall(args []string) error {
 	if err := svc.Supported(); err != nil {
 		return err
 	}
-	if err := (&svc.Systemd{}).Uninstall(); err != nil {
+	if err := svc.Uninstall(); err != nil {
 		return err
 	}
 	fmt.Printf("Stopped and removed the meshbridge service. The config (and this bridge's token) is still in %s;\n",
