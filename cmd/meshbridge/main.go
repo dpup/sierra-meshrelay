@@ -46,6 +46,7 @@ Usage:
   meshbridge find-node [-host addr]
                                   Find nodes on this network and print their identity
   meshbridge connect <gateway>    Use a remote gateway as a local TCP companion port
+  meshbridge admin <command>      Approve pairing codes, create invites (SIERRA admins)
   meshbridge version              Print version and build info
 
 Every command takes -config (default: this OS's config path).
@@ -70,6 +71,8 @@ func main() {
 		err = cmdResume(os.Args[2:])
 	case "connect":
 		err = cmdConnect(os.Args[2:])
+	case "admin":
+		err = cmdAdmin(os.Args[2:])
 	case "install":
 		err = cmdInstall(os.Args[2:])
 	case "uninstall":

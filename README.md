@@ -91,6 +91,16 @@ meshcore-cli -t 127.0.0.1 -p 5000 infos
 
 `connect` listens on `127.0.0.1:5000` and takes a lease only while an app is connected. It serves one app at a time, renews the lease automatically while the app is active, and explains any refusal in plain words (for example busy, offline or paused). Use `-listen` to choose a different port. Listening on a non-loopback address prints a warning, because companion apps have no authentication.
 
+### Pairing hosts (SIERRA admins)
+
+```sh
+export MESHBRIDGE_ADMIN_TOKEN=smc_…        # or save it to ~/.config/meshbridge/admin.token (chmod 600)
+meshbridge admin pairings                  # codes waiting, with computer, node, and the name they'd get
+meshbridge admin approve K7M-4QX           # named after the node; or: approve K7M-4QX jay-murphys
+meshbridge admin invite                    # a passphrase and a ready-to-send message, for hosts you expect
+meshbridge admin gateways                  # what's online
+```
+
 ### A local relay
 
 `go run ./cmd/devrelay -gateway cabin` runs the real relay on `127.0.0.1:8090`, with a throwaway database, and prints an admin token, the gateway's bridge token, an operator token and ready-to-paste commands. Use it to try a bridge, `connect`, pairing or pause without the production relay. To pair against it, run `meshbridge setup -relay ws://127.0.0.1:8090/mesh/relay`, then approve the code with `curl -X POST -H "Authorization: Bearer <admin>" -d '{"gateway":"cabin2"}' http://127.0.0.1:8090/mesh/relay/api/pairings/<code>/approve`.

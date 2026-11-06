@@ -63,9 +63,9 @@ JSON over HTTPS under `/mesh/relay/api/`. Requires an `admin` or `operator` toke
 | `POST /clients` `{name, role}` / `DELETE /clients/<name>` | Issue and revoke client tokens |
 | `GET /leases` | Current and recent leases (audit) |
 | `GET /pairings` | Device codes waiting for approval: code, host label, source IP, the node the bridge reported |
-| `POST /pairings/<code>/approve` `{gateway, expected_pubkey?, notes?, repair?}` | Approve a code. Creates the gateway, or with `repair: true` re-pairs an existing one (rotating its token and closing its session with 4001). The pin is `expected_pubkey` or else the node the bridge reported. The code is case- and hyphen-insensitive. |
+| `POST /pairings/<code>/approve` `{gateway?, expected_pubkey?, notes?, repair?}` | Approve a code. Without `gateway`, the gateway is named after the reported node, or else the computer (`SIERRA Elmer` becomes `sierra-elmer`, then `-2`, `-3`… if taken). `GET /pairings` shows that name as `suggested_gateway`. Creates the gateway, or with `repair: true` re-pairs an existing one (rotating its token and closing its session with 4001). The pin is `expected_pubkey` or else the node the bridge reported. The code is case- and hyphen-insensitive. |
 | `POST /pairings/<code>/deny` | Refuse a code; the bridge's next poll reads `denied` |
-| `POST /invites` `{gateway? \| name_prefix?, max_uses?, expires_in_hours? \| expires_at?, expected_pubkey?, note?}` | Create a passphrase invite. Returns the passphrase and a `sierramesh://` link **once**. Single use with `gateway`; `name_prefix` names gateways `<prefix>-1`, `-2`… (up to 100 uses). Expires in 7 days by default, 30 at most. |
+| `POST /invites` `{gateway? \| name_prefix?, max_uses?, expires_in_hours? \| expires_at?, expected_pubkey?, note?}` | Create a passphrase invite. Returns the passphrase and a `sierramesh://` link **once**. `gateway` names it (single use). `name_prefix` names gateways `<prefix>-1`, `-2`… (up to 100 uses). With neither, each gateway is named after its node when redeemed. Expires in 7 days by default, 30 at most. |
 | `GET /invites` / `DELETE /invites/<id>` | List invites (never the passphrase) / revoke one. Revoking doesn't touch gateways already created from it. |
 
 A minimal read-only status page (gateways, online/offline, last seen) is a nice-to-have and is useful during the pilot.
@@ -79,7 +79,8 @@ A minimal read-only status page (gateways, online/offline, last seen) is a nice-
 - **Limits:** `pair/start` 20 per IP per 10 min; passphrase attempts 10 per IP and 200 in total per hour; at most 50 pending codes. Tune with `Config.Pairing`.
 - **Notifications:** each redemption or approval adds a `paired` or `repaired` gateway event and logs at warn level with the source IP and host label, so admins can spot one they didn't expect.
 - **`Config.PublicBaseURL`** (default `https://data.sierragridteam.org`) builds the `verification_url` and the `relay` URL handed to a paired bridge.
-- **Not built yet:** the approval page at `/mesh/pair`, which `verification_url` points to. Admins approve with the API for now.
+- **Not built yet:** the approval page at `/mesh/pair`, which `verification_url` points to. Admins approve with `meshbridge admin` (below) or the API.
+- **`meshbridge admin`** wraps these endpoints for admins: `pairings`, `approve <code> [gateway]`, `deny`, `invite [gateway]` (which prints a message to send the host, with the passphrase and the install one-liner), `invites`, `revoke` and `gateways`. It reads the admin token from `$MESHBRIDGE_ADMIN_TOKEN` or `~/.config/meshbridge/admin.token`.
 
 ### Pause (implementation)
 

@@ -381,8 +381,14 @@ func (r *Relay) redeemInviteLocked(body meshproto.PairStartRequest, ip string, n
 		pinned = reported
 	}
 	name := inv.Gateway
-	if name == "" {
+	switch {
+	case name != "":
+	case inv.NamePrefix != "":
 		if name, err = r.nextGatewayName(inv.NamePrefix, inv.Uses+1); err != nil {
+			return meshproto.PairResult{}, err
+		}
+	default:
+		if name, err = r.suggestGatewayName(body.Node.Name, body.HostLabel); err != nil {
 			return meshproto.PairResult{}, err
 		}
 	}
@@ -401,6 +407,56 @@ func (r *Relay) redeemInviteLocked(body meshproto.PairStartRequest, ip string, n
 		"invite", inv.ID, "ip", ip, "host_label", body.HostLabel, "node_pubkey", reported, "repaired", repaired)
 	return meshproto.PairResult{Status: meshproto.PairApproved, Gateway: name, Token: tok,
 		Relay: r.relayURL(), ExpectedPubkey: pinned}, nil
+}
+
+// slugify turns a node or computer name into a gateway name candidate:
+// lowercase, runs of anything but [a-z0-9] become one hyphen, trimmed to
+// fit the name rules (leaving room for a -N suffix).
+func slugify(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		case !dash && b.Len() > 0:
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if len(out) > 36 {
+		out = strings.Trim(out[:36], "-")
+	}
+	return out
+}
+
+// suggestGatewayName picks a free gateway name from the first usable
+// candidate (node name, then computer name), adding -2, -3… if it's taken.
+func (r *Relay) suggestGatewayName(candidates ...string) (string, error) {
+	base := "gateway"
+	for _, c := range candidates {
+		if s := slugify(c); ValidGatewayName(s) {
+			base = s
+			break
+		}
+	}
+	for n := 1; n < 1000; n++ {
+		name := base
+		if n > 1 {
+			name = base + "-" + strconv.Itoa(n)
+		}
+		if !ValidGatewayName(name) {
+			continue
+		}
+		if _, err := r.store.Gateway(name); stderrors.Is(err, ErrNotFound) {
+			return name, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free gateway name for %q", base)
 }
 
 // nextGatewayName finds the first free <prefix>-<n>, starting at n.
@@ -455,8 +511,10 @@ type PendingPairing struct {
 	Agent     Agent              `json:"agent"`
 	Node      meshproto.PairNode `json:"node"`
 	Status    string             `json:"status"`
-	CreatedAt time.Time          `json:"created_at"`
-	ExpiresAt time.Time          `json:"expires_at"`
+	// SuggestedGateway is the name approve uses when none is given.
+	SuggestedGateway string    `json:"suggested_gateway"`
+	CreatedAt        time.Time `json:"created_at"`
+	ExpiresAt        time.Time `json:"expires_at"`
 }
 
 func (r *Relay) apiListPairings(_ *http.Request, _ *ClientRecord) (any, error) {
@@ -467,8 +525,10 @@ func (r *Relay) apiListPairings(_ *http.Request, _ *ClientRecord) (any, error) {
 	p.pruneLocked(now)
 	out := make([]PendingPairing, 0, len(p.byID))
 	for _, pr := range p.byID {
+		suggested, _ := r.suggestGatewayName(pr.node.Name, pr.hostLabel)
 		out = append(out, PendingPairing{UserCode: pr.userCode, HostLabel: pr.hostLabel, IP: pr.ip,
-			Agent: pr.agent, Node: pr.node, Status: pr.status, CreatedAt: pr.created.UTC(), ExpiresAt: pr.expires.UTC()})
+			Agent: pr.agent, Node: pr.node, Status: pr.status, SuggestedGateway: suggested,
+			CreatedAt: pr.created.UTC(), ExpiresAt: pr.expires.UTC()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return map[string]any{"pairings": out}, nil
@@ -498,15 +558,21 @@ func (r *Relay) apiApprovePairing(req *http.Request, who *ClientRecord) (any, er
 	if err := decodeBody(req, &body); err != nil {
 		return nil, err
 	}
-	if !ValidGatewayName(body.Gateway) {
-		return nil, errors.NewC("gateway name must match [a-z0-9-]{3,40} and not be reserved", codes.InvalidArgument)
-	}
 	p := r.pairs
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	pr, err := r.pendingByCode(req.PathValue("code"))
 	if err != nil {
 		return nil, err
+	}
+	if body.Gateway == "" {
+		// No name given: name it after the node (or the computer).
+		if body.Gateway, err = r.suggestGatewayName(pr.node.Name, pr.hostLabel); err != nil {
+			return nil, errors.Wrap(err, 0)
+		}
+	}
+	if !ValidGatewayName(body.Gateway) {
+		return nil, errors.NewC("gateway name must match [a-z0-9-]{3,40} and not be reserved", codes.InvalidArgument)
 	}
 	pinned := ""
 	switch {
@@ -586,8 +652,6 @@ func (r *Relay) apiCreateInvite(req *http.Request, who *ClientRecord) (any, erro
 		return nil, errors.NewC("a multi-use invite names gateways with name_prefix, not gateway", codes.InvalidArgument)
 	case body.Gateway != "" && !ValidGatewayName(body.Gateway):
 		return nil, errors.NewC("gateway name must match [a-z0-9-]{3,40} and not be reserved", codes.InvalidArgument)
-	case body.Gateway == "" && body.NamePrefix == "":
-		return nil, errors.NewC("set gateway (single use) or name_prefix", codes.InvalidArgument)
 	case body.NamePrefix != "" && !ValidGatewayName(body.NamePrefix+"-1") || len(body.NamePrefix) > 34:
 		return nil, errors.NewC("name_prefix must be [a-z0-9-], at most 34 characters", codes.InvalidArgument)
 	}
