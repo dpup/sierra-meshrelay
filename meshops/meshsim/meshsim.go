@@ -24,6 +24,9 @@ type Repeater struct {
 	BatteryMV   uint16
 	UptimeS     uint32
 	TempC       float64
+	// Advert is the raw advert packet a node that heard it stores (and
+	// CMD_EXPORT_CONTACT returns); nil means none stored.
+	Advert []byte
 }
 
 // Node is a fake companion node. The zero value is not usable; use New.
@@ -180,6 +183,14 @@ func (n *Node) Handle(f []byte, reply func([]byte)) bool {
 		}
 		n.contacts = append(n.contacts[:i], n.contacts[i+1:]...)
 		reply([]byte{0})
+	case 17: // EXPORT_CONTACT
+		pk, _ := pkAt(1)
+		r := n.repeaters[pk]
+		if n.find(pk) < 0 || r == nil || r.Advert == nil {
+			errFrame(2)
+			return true
+		}
+		reply(append([]byte{11}, r.Advert...))
 	case 30: // GET_CONTACT_BY_KEY
 		pk, _ := pkAt(1)
 		i := n.find(pk)

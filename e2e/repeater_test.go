@@ -181,7 +181,8 @@ func TestCheckRepeaterOnlyIfKnown(t *testing.T) {
 	lr := startRelay(t, withSecretKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	rpt := &meshsim.Repeater{Pubkey: hexKey("d"), Name: "Peak", GuestPassword: "g", BatteryMV: 3700, TempC: -2.5}
+	rpt := &meshsim.Repeater{Pubkey: hexKey("d"), Name: "Peak", GuestPassword: "g", BatteryMV: 3700, TempC: -2.5,
+		Advert: []byte{0x11, 0x00, 0xde, 0xad}}
 	deaf := meshsim.New() // in range, but hasn't heard its advert
 	deaf.AddInRange(rpt)
 	heard := meshsim.New(rpt)
@@ -197,7 +198,8 @@ func TestCheckRepeaterOnlyIfKnown(t *testing.T) {
 	}
 	req.Gateway = "heard"
 	res, err := lr.relay.CheckRepeater(ctx, req)
-	if err != nil || res.Name != "Peak" || *res.Status.BatteryMilliVolts != 3700 || res.Telemetry == nil || *res.Telemetry.TemperatureC != -2.5 {
+	if err != nil || res.Name != "Peak" || *res.Status.BatteryMilliVolts != 3700 || res.Telemetry == nil || *res.Telemetry.TemperatureC != -2.5 ||
+		string(res.Advert) != string(rpt.Advert) {
 		t.Fatalf("heard gateway: %+v %v", res, err)
 	}
 }

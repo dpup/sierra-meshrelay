@@ -31,6 +31,7 @@ const (
 	cmdSetDeviceTime    byte = 6
 	cmdAddUpdateContact byte = 9
 	cmdRemoveContact    byte = 15
+	cmdExportContact    byte = 17
 	cmdSendLogin        byte = 26
 	cmdSendStatusReq    byte = 27
 	cmdGetContactByKey  byte = 30
@@ -44,6 +45,7 @@ const (
 	respSelfInfo      byte = 5
 	respSent          byte = 6
 	respCurrTime      byte = 9
+	respExportContact byte = 11
 
 	pushLoginSuccess      byte = 0x85
 	pushLoginFail         byte = 0x86
@@ -369,6 +371,30 @@ func (s *Session) RemoveContact(ctx context.Context, pubkey string) error {
 		return ErrNotFound
 	}
 	return err
+}
+
+// ExportContact returns the last advert the node received from a contact:
+// the raw over-the-air packet (header, path, payload), signed by the
+// contact, exactly as the node stored it. Anyone can verify it, so it can be
+// forwarded to proof-checking services. ErrNotFound if the node has no
+// advert stored for it.
+func (s *Session) ExportContact(ctx context.Context, pubkey string) ([]byte, error) {
+	pk, err := decodePubkey(pubkey)
+	if err != nil {
+		return nil, err
+	}
+	f, err := s.call(ctx, append([]byte{cmdExportContact}, pk...), respExportContact)
+	var re *RefusedError
+	if errors.As(err, &re) && re.Code == ErrCodeNotFound {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(f) < 2 {
+		return nil, ErrNotFound
+	}
+	return append([]byte(nil), f[1:]...), nil
 }
 
 // meshRequest sends a request that travels over the mesh: the node answers

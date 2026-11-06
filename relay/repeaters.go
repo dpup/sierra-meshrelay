@@ -269,6 +269,11 @@ type RepeaterCheck struct {
 	Status    *meshops.Status    `json:"status,omitempty"`
 	Telemetry *meshops.Telemetry `json:"telemetry,omitempty"`
 	Gateway   string             `json:"gateway"`
+	// Advert is the repeater's last signed advert as the gateway's node
+	// stored it (the raw packet), when it had one. A poller can forward it
+	// to services that verify adverts, so a repeater whose adverts never
+	// reach the wider mesh (an island) can still be established.
+	Advert []byte `json:"-"`
 }
 
 // CheckRequest asks CheckRepeater to read a repeater through one gateway.
@@ -337,6 +342,9 @@ func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCh
 			res.Status = &st
 			if tm, err := s.Telemetry(ctx, pubkey); err == nil {
 				res.Telemetry = &tm
+			}
+			if adv, err := s.ExportContact(ctx, pubkey); err == nil {
+				res.Advert = adv
 			}
 			return nil
 		})

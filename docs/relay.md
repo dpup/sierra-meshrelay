@@ -96,6 +96,7 @@ A host shares a repeater with SIERRA so the relay can log in to it over the mesh
 - **Passwords** are sealed with AES-256-GCM under `Config.SecretKey` (sierra-data: `PF__MESH_RELAY__SECRET_KEY`, 32 bytes base64), with the repeater's pubkey as additional data. No API returns them; only `Relay.RepeaterCredentials`, for the in-process poller, opens them. Without the key, sharing answers 503.
 - **Ownership.** The gateway that shared a repeater, or an admin, can remove it. Another gateway can't overwrite or remove it. Removing deletes the password.
 - **Hosts are warned** that any SIERRA gateway in range may be used to log in, and are asked for the guest password first (a guest can read status; MeshCore repeaters answer `GET_STATUS` to guests).
+- **Adverts for islands.** A check also exports the repeater's last signed advert from the gateway's node (`CMD_EXPORT_CONTACT`, `RepeaterCheck.Advert`). sierra-data's poller forwards it to the Grid's `mesh.packet` stream, which verifies the signature, so a repeater whose adverts never reach the wider mesh can still be established.
 - **Package `meshops`** holds the companion operations (contacts, login, status, telemetry, clock), usable over any transport; `meshops/meshsim` is a fake node with repeaters for tests. `Relay.Use` runs them under a lease, and `Relay.CheckRepeater` is the whole check.
 
 ### Pause (implementation)
