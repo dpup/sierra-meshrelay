@@ -12,6 +12,7 @@ import (
 	"github.com/dpup/sierra-meshrelay/internal/admin"
 	"github.com/dpup/sierra-meshrelay/internal/config"
 	"github.com/dpup/sierra-meshrelay/internal/fakenode"
+	"github.com/dpup/sierra-meshrelay/meshops"
 	"github.com/dpup/sierra-meshrelay/meshops/meshsim"
 	"github.com/dpup/sierra-meshrelay/relay"
 )
@@ -201,5 +202,39 @@ func TestCheckRepeaterOnlyIfKnown(t *testing.T) {
 	if err != nil || res.Name != "Peak" || *res.Status.BatteryMilliVolts != 3700 || res.Telemetry == nil || *res.Telemetry.TemperatureC != -2.5 ||
 		string(res.Advert) != string(rpt.Advert) {
 		t.Fatalf("heard gateway: %+v %v", res, err)
+	}
+}
+
+// TestCheckRepeaterResetsStalePath: a node whose stored direct route to the
+// repeater no longer works gets no answer; the check resets the route,
+// floods, and the node learns a working one from the reply.
+func TestCheckRepeaterResetsStalePath(t *testing.T) {
+	lr := startRelay(t, withSecretKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	rpt := &meshsim.Repeater{Pubkey: hexKey("e"), Name: "Outpost", GuestPassword: "g", BatteryMV: 3900}
+	mesh := meshsim.New(rpt)
+	mesh.SetStalePath(rpt.Pubkey)
+	tok := lr.createGateway("mission")
+	startBridge(t, lr, "mission", tok, startMeshNode(t, "mission", mesh))
+	lr.waitGateway("mission", "online", connected)
+
+	req := relay.CheckRequest{Gateway: "mission", Client: "telemetry", Priority: relay.PriorityBackground,
+		Pubkey: rpt.Pubkey, Password: "g", OnlyIfKnown: true}
+	res, err := lr.relay.CheckRepeater(ctx, req)
+	if err != nil || !res.PathReset || res.Access != "guest" || *res.Status.BatteryMilliVolts != 3900 {
+		t.Fatalf("stale path: %+v %v", res, err)
+	}
+	if !mesh.PathKnown(rpt.Pubkey) {
+		t.Fatal("the node didn't learn a route from the flood reply")
+	}
+	// The learned route works: no reset next time.
+	if res, err = lr.relay.CheckRepeater(ctx, req); err != nil || res.PathReset {
+		t.Fatalf("second check: %+v %v", res, err)
+	}
+	// A repeater that's really gone isn't retried forever: one reset, then the error.
+	mesh.SetUnreachable(rpt.Pubkey, true)
+	if _, err = lr.relay.CheckRepeater(ctx, req); !errors.Is(err, meshops.ErrNoMeshReply) {
+		t.Fatalf("unreachable: %v", err)
 	}
 }

@@ -274,6 +274,9 @@ type RepeaterCheck struct {
 	// to services that verify adverts, so a repeater whose adverts never
 	// reach the wider mesh (an island) can still be established.
 	Advert []byte `json:"-"`
+	// PathReset says the node's direct route to the repeater went
+	// unanswered, so the check reset it and flooded instead.
+	PathReset bool `json:"path_reset,omitempty"`
 }
 
 // CheckRequest asks CheckRepeater to read a repeater through one gateway.
@@ -330,12 +333,38 @@ func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCh
 			// A node whose clock went backwards can't log in (replay
 			// protection); companion apps set the clock on connect too.
 			_, _ = s.SyncClock(ctx, 5*time.Minute)
+			// A node keeps the direct route it last learned, and a route
+			// that stopped working (the repeater can't hear this node, or a
+			// hop moved) is never answered. Like the apps' "Reset path", the
+			// check then resets it once and floods; the node learns a working
+			// route from the reply.
+			flood := func(err error) bool {
+				if res.PathReset || !stderrors.Is(err, meshops.ErrNoMeshReply) {
+					return false
+				}
+				if c, cerr := s.Contact(ctx, pubkey); cerr != nil || !c.PathKnown {
+					return false
+				}
+				if s.ResetPath(ctx, pubkey) != nil {
+					return false
+				}
+				res.PathReset = true
+				logging.Infow(r.ctx, "repeater check: direct route unanswered; reset it and flooding",
+					"gateway", req.Gateway, "repeater", pubkey)
+				return true
+			}
 			login, err := s.Login(ctx, pubkey, req.Password)
+			if flood(err) {
+				login, err = s.Login(ctx, pubkey, req.Password)
+			}
 			if err != nil {
 				return err
 			}
 			res.Access = login.Access()
 			st, err := s.Status(ctx, pubkey)
+			if flood(err) {
+				st, err = s.Status(ctx, pubkey)
+			}
 			if err != nil {
 				return err
 			}

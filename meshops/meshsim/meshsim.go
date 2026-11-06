@@ -51,7 +51,8 @@ type contact struct {
 	typ    byte
 	name   string
 	advert uint32
-	path   byte
+	path   byte // 0xFF: no direct route, requests flood
+	stale  bool // the direct route no longer reaches it
 }
 
 // New returns a node that has heard the given repeaters' adverts (they are in
@@ -65,6 +66,25 @@ func New(heard ...*Repeater) *Node {
 		n.contacts = append(n.contacts, contact{pubkey: pk, typ: 2, name: r.Name, advert: uint32(time.Now().Unix()), path: 0xFF})
 	}
 	return n
+}
+
+// SetStalePath gives the node a direct route to a contact that no longer
+// works (the repeater can't hear it, or a hop moved): requests sent over it
+// get no answer until the path is reset and the node floods.
+func (n *Node) SetStalePath(pubkey string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if i := n.find(pubkey); i >= 0 {
+		n.contacts[i].path, n.contacts[i].stale = 0, true
+	}
+}
+
+// PathKnown reports whether the node has a direct route to a contact.
+func (n *Node) PathKnown(pubkey string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	i := n.find(pubkey)
+	return i >= 0 && n.contacts[i].path != 0xFF
 }
 
 // AddInRange puts a repeater in range without the node having heard it.
@@ -174,6 +194,15 @@ func (n *Node) Handle(f []byte, reply func([]byte)) bool {
 			n.contacts = append(n.contacts, c)
 		}
 		reply([]byte{0})
+	case 13: // RESET_PATH
+		pk, _ := pkAt(1)
+		i := n.find(pk)
+		if i < 0 {
+			errFrame(2)
+			return true
+		}
+		n.contacts[i].path, n.contacts[i].stale = 0xFF, false
+		reply([]byte{0})
 	case 15: // REMOVE_CONTACT
 		pk, _ := pkAt(1)
 		i := n.find(pk)
@@ -205,14 +234,20 @@ func (n *Node) Handle(f []byte, reply func([]byte)) bool {
 			off = 4
 		}
 		pk, ok := pkAt(off)
-		if !ok || n.find(pk) < 0 {
+		ci := n.find(pk)
+		if !ok || ci < 0 {
 			errFrame(2)
 			return true
 		}
-		reply(binary.LittleEndian.AppendUint32(append([]byte{6, 1}, 1, 2, 3, 4), 500))
+		flood := n.contacts[ci].path == 0xFF
+		reply(binary.LittleEndian.AppendUint32(append([]byte{6, b2u(flood)}, 1, 2, 3, 4), 500))
 		r := n.repeaters[pk]
-		if r == nil || r.Unreachable {
+		if r == nil || r.Unreachable || n.contacts[ci].stale {
 			return true
+		}
+		if flood {
+			// The reply comes back with its route, which the node keeps.
+			n.contacts[ci].path = 1
 		}
 		prefix := f[off : off+6]
 		var push []byte
@@ -280,6 +315,13 @@ func contactFrame(c contact) []byte {
 	f = append(f, name...)
 	f = binary.LittleEndian.AppendUint32(f, c.advert)
 	return append(f, make([]byte, 12)...)
+}
+
+func b2u(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func cstr(b []byte) string {

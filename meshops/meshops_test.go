@@ -139,3 +139,29 @@ func TestParseShortStatus(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+func TestResetPath(t *testing.T) {
+	ctx := context.Background()
+	r := &meshsim.Repeater{Pubkey: pk(5), Name: "Outpost", GuestPassword: "g"}
+	n := meshsim.New(r)
+	s := session(n)
+	n.SetStalePath(r.Pubkey)
+	if c, _ := s.Contact(ctx, r.Pubkey); !c.PathKnown {
+		t.Fatal("stale path not reported as known")
+	}
+	if _, err := s.Login(ctx, r.Pubkey, "g"); !errors.Is(err, meshops.ErrNoMeshReply) {
+		t.Fatalf("over the stale path: %v", err)
+	}
+	if err := s.ResetPath(ctx, r.Pubkey); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := s.Contact(ctx, r.Pubkey); c.PathKnown {
+		t.Fatal("path still known after reset")
+	}
+	if _, err := s.Login(ctx, r.Pubkey, "g"); err != nil || !n.PathKnown(r.Pubkey) {
+		t.Fatalf("flooded login: %v (learned route: %v)", err, n.PathKnown(r.Pubkey))
+	}
+	if err := s.ResetPath(ctx, pk(6)); !errors.Is(err, meshops.ErrNotFound) {
+		t.Fatalf("unknown contact: %v", err)
+	}
+}

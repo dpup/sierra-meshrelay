@@ -30,6 +30,7 @@ const (
 	cmdGetDeviceTime    byte = 5
 	cmdSetDeviceTime    byte = 6
 	cmdAddUpdateContact byte = 9
+	cmdResetPath        byte = 13
 	cmdRemoveContact    byte = 15
 	cmdExportContact    byte = 17
 	cmdSendLogin        byte = 26
@@ -366,6 +367,22 @@ func (s *Session) RemoveContact(ctx context.Context, pubkey string) error {
 		return err
 	}
 	_, err = s.call(ctx, append([]byte{cmdRemoveContact}, pk...), respOK)
+	var re *RefusedError
+	if errors.As(err, &re) && re.Code == ErrCodeNotFound {
+		return ErrNotFound
+	}
+	return err
+}
+
+// ResetPath forgets the node's direct route to a contact, so its next
+// request floods (the MeshCore apps' "Reset path"). The node learns a route
+// again from the reply. ErrNotFound if it isn't a contact.
+func (s *Session) ResetPath(ctx context.Context, pubkey string) error {
+	pk, err := decodePubkey(pubkey)
+	if err != nil {
+		return err
+	}
+	_, err = s.call(ctx, append([]byte{cmdResetPath}, pk...), respOK)
 	var re *RefusedError
 	if errors.As(err, &re) && re.Code == ErrCodeNotFound {
 		return ErrNotFound
