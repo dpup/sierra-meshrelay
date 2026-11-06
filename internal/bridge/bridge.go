@@ -18,6 +18,7 @@ import (
 
 	"github.com/dpup/sierra-meshrelay/internal/config"
 	"github.com/dpup/sierra-meshrelay/internal/nodelink"
+	"github.com/dpup/sierra-meshrelay/internal/state"
 	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
@@ -41,9 +42,9 @@ type Options struct {
 	OutQueue        int           // node→relay frame buffer (default 64)
 	Backoff         *Backoff      // relay reconnect policy (default DefaultBackoff)
 
-	// StatePath is where a pause "until resumed" is saved so it survives a
-	// restart. Empty disables saving.
-	StatePath string
+	// State persists what must survive a restart (a pause "until resumed").
+	// Nil keeps it in memory only.
+	State *state.File
 }
 
 func (o *Options) defaults() {

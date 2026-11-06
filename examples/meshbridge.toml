@@ -9,7 +9,7 @@ relay   = "wss://data.sierragridteam.org/mesh/relay"
 [node]
 link = "tcp"                 # auto | serial | tcp (serial arrives in M2)
 expected_pubkey = ""         # 64 hex chars; empty = report whatever node answers
-tcp_host = "192.168.1.50"    # required until LAN scanning lands
+tcp_host = "192.168.1.50"    # optional hint; the bridge rescans the LAN if the node moves
 tcp_port = 5000
 
 [log]

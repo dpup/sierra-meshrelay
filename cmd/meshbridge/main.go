@@ -24,6 +24,7 @@ import (
 	"github.com/dpup/sierra-meshrelay/internal/control"
 	"github.com/dpup/sierra-meshrelay/internal/nodelink"
 	"github.com/dpup/sierra-meshrelay/internal/relayclient"
+	"github.com/dpup/sierra-meshrelay/internal/state"
 	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
@@ -40,7 +41,10 @@ Usage:
   meshbridge pause [1h|tomorrow|until-resumed]
                                   Stop sharing the node (default 1h)
   meshbridge resume               Start sharing again
-  meshbridge find-node -host addr Connect to a TCP node and print its identity
+  meshbridge install              Install as a system service (systemd; needs sudo)
+  meshbridge uninstall            Stop and remove the service (keeps the config)
+  meshbridge find-node [-host addr]
+                                  Find nodes on this network and print their identity
   meshbridge connect <gateway>    Use a remote gateway as a local TCP companion port
   meshbridge version              Print version and build info
 
@@ -66,6 +70,10 @@ func main() {
 		err = cmdResume(os.Args[2:])
 	case "connect":
 		err = cmdConnect(os.Args[2:])
+	case "install":
+		err = cmdInstall(os.Args[2:])
+	case "uninstall":
+		err = cmdUninstall(os.Args[2:])
 	case "find-node":
 		err = cmdFindNode(os.Args[2:])
 	case "version", "-version", "--version":
@@ -95,22 +103,24 @@ func cmdRun(args []string) error {
 	}
 	log := newLogger(cfg.Log.Level, *logJSON)
 
-	if cfg.Node.TCPHost == "" {
-		// LAN scanning and serial auto-detect arrive in later milestones.
-		return errors.New("node.tcp_host is required for now (auto-detect isn't built yet)")
-	}
-	opener := nodelink.TCP{Host: cfg.Node.TCPHost, Port: cfg.Node.TCPPort}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("meshbridge starting", "version", version, "gateway", cfg.Gateway, "relay", cfg.Relay,
-		"node", fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort))
 	dir := filepath.Dir(*path)
+	st := state.New(filepath.Join(dir, "state.json"))
+	// A WiFi node's DHCP address can change: Discover tries the configured
+	// address, then the last one that worked, then scans the LAN for the
+	// node with the expected pubkey. (Serial nodes arrive with M2.)
+	opener := &nodelink.Discover{Host: cfg.Node.TCPHost, Port: cfg.Node.TCPPort,
+		ExpectedPubkey: cfg.Node.ExpectedPubkey, State: st, Log: log}
+	detail := "auto (LAN scan)"
+	if cfg.Node.TCPHost != "" {
+		detail = fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort)
+	}
+	log.Info("meshbridge starting", "version", version, "gateway", cfg.Gateway, "relay", cfg.Relay, "node", detail)
 	b := bridge.New(bridge.Options{
 		Config: cfg, Opener: opener, Log: log, Version: version,
-		LinkKind: meshproto.LinkTCP, LinkDetail: fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort),
-		StatePath: filepath.Join(dir, "state.json"),
+		LinkKind: meshproto.LinkTCP, LinkDetail: detail, State: st,
 	})
 	if *controlAddr != "off" {
 		tok, err := control.LoadOrCreateToken(filepath.Join(dir, control.TokenFile))
@@ -139,6 +149,15 @@ func newLogger(level string, asJSON bool) *slog.Logger {
 		lvl = slog.LevelInfo
 	}
 	opts := &slog.HandlerOptions{Level: lvl}
+	if os.Getenv("JOURNAL_STREAM") != "" {
+		// Under systemd, journald timestamps every line itself.
+		opts.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		}
+	}
 	if asJSON {
 		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
@@ -164,7 +183,15 @@ func cmdFindNode(args []string) error {
 	port := fs.Int("port", 5000, "node TCP port")
 	_ = fs.Parse(args)
 	if *host == "" {
-		return errors.New("-host is required for now")
+		fmt.Printf("Looking for nodes on this network (port %d)…\n", *port)
+		found := (&nodelink.Discover{Port: *port}).Scan(context.Background())
+		if len(found) == 0 {
+			return errors.New("no node found on this network (use -host if it's on another subnet)")
+		}
+		for _, f := range found {
+			fmt.Printf("Found: %s\n  link    tcp %s\n  pubkey  %s\n  model   %s\n  fw      %s\n", f.Name, f.Addr, f.Pubkey, f.Model, f.FW)
+		}
+		return nil
 	}
 	id, detail, err := identifyTCP(*host, *port)
 	if err != nil {

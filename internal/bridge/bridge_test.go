@@ -17,6 +17,7 @@ import (
 	"github.com/dpup/sierra-meshrelay/internal/fakenode"
 	"github.com/dpup/sierra-meshrelay/internal/nodelink"
 	"github.com/dpup/sierra-meshrelay/internal/relaytest"
+	statefile "github.com/dpup/sierra-meshrelay/internal/state"
 	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
@@ -469,7 +470,7 @@ func TestTimedPauseRunsOut(t *testing.T) {
 
 func TestPauseUntilResumedSurvivesRestart(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state.json")
-	h := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	h := start(t, setup{tune: func(o *bridge.Options) { o.State = statefile.New(state) }})
 	s := h.session()
 	expectNode(t, s, meshproto.NodeConnected)
 	h.bridge.Pause(time.Time{})
@@ -480,7 +481,7 @@ func TestPauseUntilResumedSurvivesRestart(t *testing.T) {
 	h.stop()
 
 	// A new bridge with the same state file starts paused and says so in hello.
-	h2 := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	h2 := start(t, setup{tune: func(o *bridge.Options) { o.State = statefile.New(state) }})
 	s2 := h2.session()
 	if s2.Hello.Node.State != meshproto.NodePaused {
 		t.Fatalf("hello after restart: %+v", s2.Hello.Node)
@@ -497,10 +498,10 @@ func TestPauseUntilResumedSurvivesRestart(t *testing.T) {
 
 func TestTimedPauseDoesNotSurviveRestart(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state.json")
-	h := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	h := start(t, setup{tune: func(o *bridge.Options) { o.State = statefile.New(state) }})
 	h.bridge.Pause(time.Now().Add(time.Hour))
 	h.stop()
-	h2 := start(t, setup{tune: func(o *bridge.Options) { o.StatePath = state }})
+	h2 := start(t, setup{tune: func(o *bridge.Options) { o.State = statefile.New(state) }})
 	s2 := h2.session()
 	expectNode(t, s2, meshproto.NodeConnected)
 }

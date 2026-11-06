@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/dpup/sierra-meshrelay/internal/control"
 	"github.com/dpup/sierra-meshrelay/internal/nodelink"
 	"github.com/dpup/sierra-meshrelay/internal/pairing"
+	"github.com/dpup/sierra-meshrelay/internal/svc"
 	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
@@ -83,23 +85,16 @@ func cmdSetup(args []string) error {
 	if h, err := os.Hostname(); err == nil {
 		req.HostLabel = h
 	}
-	if cfg.Node.TCPHost != "" {
-		fmt.Printf("Looking for your node at %s:%d…\n", cfg.Node.TCPHost, cfg.Node.TCPPort)
-		id, detail, err := identifyTCP(cfg.Node.TCPHost, cfg.Node.TCPPort)
-		if err != nil {
-			fmt.Printf("Couldn't reach it (%v). Pairing anyway; the bridge will keep looking.\n\n", err)
-		} else {
-			fmt.Printf("Found: %s · %s (%s)\n\n", id.Name, id.Model, detail)
-			req.Node = meshproto.PairNode{Node: meshproto.Node{State: meshproto.NodeConnected,
-				Pubkey: id.Pubkey, Name: id.Name, FW: id.FW, Model: id.Model}, Link: meshproto.LinkTCP}
-		}
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	client := &pairing.Client{APIBase: config.HTTPBase(cfg.Relay)}
 	interactive := isTerminal(os.Stdin)
 	in := bufio.NewReader(os.Stdin)
+
+	if id, ok := findNodeForSetup(ctx, &cfg, interactive, in); ok {
+		req.Node = meshproto.PairNode{Node: meshproto.Node{State: meshproto.NodeConnected,
+			Pubkey: id.Pubkey, Name: id.Name, FW: id.FW, Model: id.Model}, Link: meshproto.LinkTCP}
+	}
+	client := &pairing.Client{APIBase: config.HTTPBase(cfg.Relay)}
 
 	phrase := *passphrase
 	if phrase == "" && interactive {
@@ -149,11 +144,64 @@ func cmdSetup(args []string) error {
 		return fmt.Errorf("paired as %q, but couldn't save the config to %s: %w", res.Gateway, *path, err)
 	}
 	fmt.Printf("\nConnected to SIERRA as gateway %q. Config saved to %s.\n", res.Gateway, *path)
-	if cfg.Node.TCPHost == "" {
-		fmt.Println("Next, set node.tcp_host in that file to your node's address (auto-detect is coming).")
+	if cfg.Node.ExpectedPubkey == "" {
+		fmt.Println("No node was found yet; the bridge will keep looking on this network.")
 	}
 	fmt.Printf("Start the bridge with: meshbridge run -config %s\n", *path)
 	return nil
+}
+
+// findNodeForSetup finds the node to pair: at the configured address, or by
+// scanning the local network. It fills in cfg.Node.TCPHost/TCPPort.
+func findNodeForSetup(ctx context.Context, cfg *config.Config, interactive bool, in *bufio.Reader) (companion.Identity, bool) {
+	if cfg.Node.TCPHost != "" {
+		fmt.Printf("Looking for your node at %s:%d…\n", cfg.Node.TCPHost, cfg.Node.TCPPort)
+		id, detail, err := identifyTCP(cfg.Node.TCPHost, cfg.Node.TCPPort)
+		if err != nil {
+			fmt.Printf("Couldn't reach it (%v). Pairing anyway; the bridge will keep looking.\n\n", err)
+			return id, false
+		}
+		fmt.Printf("Found: %s · %s (%s)\n\n", id.Name, id.Model, detail)
+		return id, true
+	}
+	fmt.Println("Looking for your node on this network…")
+	found := (&nodelink.Discover{Port: cfg.Node.TCPPort}).Scan(ctx)
+	var pick *nodelink.Found
+	switch {
+	case len(found) == 0:
+		fmt.Println("No node found on this network. Pairing anyway: make sure the node's WiFi is on this network,")
+		fmt.Println("or rerun setup with -host <address>. The bridge will keep looking.")
+		fmt.Println()
+		return companion.Identity{}, false
+	case len(found) == 1:
+		pick = &found[0]
+	case interactive:
+		fmt.Println("Found more than one node:")
+		for i, f := range found {
+			fmt.Printf("  %d. %s · %s (%s)\n", i+1, f.Name, f.Model, f.Addr)
+		}
+		for pick == nil {
+			fmt.Printf("Which one is yours? [1-%d]: ", len(found))
+			line, err := in.ReadString('\n')
+			var n int
+			if _, serr := fmt.Sscanf(strings.TrimSpace(line), "%d", &n); serr == nil && n >= 1 && n <= len(found) {
+				pick = &found[n-1]
+			} else if err != nil {
+				return companion.Identity{}, false
+			}
+		}
+	default:
+		fmt.Println("Found more than one node; rerun setup with -host <address> to pick yours:")
+		for _, f := range found {
+			fmt.Printf("  %s · %s (%s)\n", f.Name, f.Model, f.Addr)
+		}
+		return companion.Identity{}, false
+	}
+	host, port, _ := net.SplitHostPort(pick.Addr)
+	cfg.Node.TCPHost, cfg.Node.Link = host, config.LinkTCP
+	fmt.Sscanf(port, "%d", &cfg.Node.TCPPort)
+	fmt.Printf("Found: %s · %s (%s)\n\n", pick.Name, pick.Model, pick.Addr)
+	return pick.Identity, true
 }
 
 func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
@@ -254,4 +302,49 @@ func printStatus(d control.StatusDoc) {
 	default:
 		fmt.Println("  Sharing:   on")
 	}
+}
+
+// --- install, uninstall ---------------------------------------------------------
+
+func cmdInstall(args []string) error {
+	fs := flag.NewFlagSet("install", flag.ExitOnError)
+	path := fs.String("config", config.DefaultPath(), "config file the service runs with")
+	_ = fs.Parse(args)
+	if err := svc.Supported(); err != nil {
+		return err
+	}
+	abs, err := filepath.Abs(*path)
+	if err != nil {
+		return err
+	}
+	if _, err := config.Load(abs); err != nil {
+		return fmt.Errorf("%w\nPair this bridge first with: sudo meshbridge setup", err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := (&svc.Systemd{}).Install(exe, abs); err != nil {
+		return err
+	}
+	fmt.Printf("Installed and started the meshbridge service (%s, config %s).\n", svc.BinaryPath, abs)
+	fmt.Println("It starts at boot and restarts if it stops. Check on it with:")
+	fmt.Println("  sudo meshbridge status")
+	fmt.Println("  journalctl -u meshbridge -f")
+	return nil
+}
+
+func cmdUninstall(args []string) error {
+	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
+	_ = fs.Parse(args)
+	if err := svc.Supported(); err != nil {
+		return err
+	}
+	if err := (&svc.Systemd{}).Uninstall(); err != nil {
+		return err
+	}
+	fmt.Printf("Stopped and removed the meshbridge service. The config (and this bridge's token) is still in %s;\n",
+		filepath.Dir(config.DefaultPath()))
+	fmt.Println("delete it too if this computer is leaving SIERRA.")
+	return nil
 }

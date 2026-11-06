@@ -2,11 +2,9 @@ package bridge
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"os"
 	"time"
 
+	"github.com/dpup/sierra-meshrelay/internal/state"
 	"github.com/dpup/sierra-meshrelay/meshproto"
 )
 
@@ -16,7 +14,7 @@ import (
 // ends any lease and turns new clients away with node_paused.
 //
 // A timed pause resumes by itself when it runs out, and also on restart. A
-// pause "until resumed" is saved to Options.StatePath so it survives a
+// pause "until resumed" is saved to Options.State so it survives a
 // restart, and only Resume ends it.
 
 // pauseState is guarded by Bridge.mu.
@@ -30,11 +28,6 @@ type pauseState struct {
 // node link is being reopened.
 const NodeErrResuming = "resuming"
 
-// savedState is the bridge's small state file.
-type savedState struct {
-	PausedUntilResumed bool `json:"paused_until_resumed,omitempty"`
-}
-
 // Pause stops sharing the node until until, or until Resume if until is zero.
 // A time in the past resumes at once.
 func (b *Bridge) Pause(until time.Time) {
@@ -46,7 +39,7 @@ func (b *Bridge) Pause(until time.Time) {
 	b.pause.paused, b.pause.until = true, until
 	b.pauseChangedLocked()
 	b.mu.Unlock()
-	b.saveState(savedState{PausedUntilResumed: until.IsZero()})
+	b.savePause(until.IsZero())
 	if until.IsZero() {
 		b.log.Info("sharing paused until resumed")
 	} else {
@@ -70,7 +63,7 @@ func (b *Bridge) Resume() {
 	}
 	b.mu.Unlock()
 	if was {
-		b.saveState(savedState{})
+		b.savePause(false)
 		b.log.Info("sharing resumed")
 	}
 }
@@ -128,44 +121,14 @@ func (b *Bridge) waitWhilePaused(ctx context.Context) {
 
 // loadState applies the saved state at startup.
 func (b *Bridge) loadState() {
-	if b.opts.StatePath == "" {
-		return
-	}
-	data, err := os.ReadFile(b.opts.StatePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	var st savedState
-	if err == nil {
-		err = json.Unmarshal(data, &st)
-	}
-	if err != nil {
-		b.log.Warn("ignoring unreadable state file", "path", b.opts.StatePath, "error", err)
-		return
-	}
-	if st.PausedUntilResumed {
+	if b.opts.State.Get().PausedUntilResumed {
 		b.pause.paused = true
 		b.log.Info("sharing is paused until resumed (saved from before restart)")
 	}
 }
 
-func (b *Bridge) saveState(st savedState) {
-	if b.opts.StatePath == "" {
-		return
-	}
-	if st == (savedState{}) {
-		if err := os.Remove(b.opts.StatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			b.log.Warn("couldn't clear state file", "path", b.opts.StatePath, "error", err)
-		}
-		return
-	}
-	data, _ := json.Marshal(st)
-	tmp := b.opts.StatePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+func (b *Bridge) savePause(untilResumed bool) {
+	if err := b.opts.State.Update(func(s *state.State) { s.PausedUntilResumed = untilResumed }); err != nil {
 		b.log.Warn("couldn't save state; a pause until resumed won't survive a restart", "error", err)
-		return
-	}
-	if err := os.Rename(tmp, b.opts.StatePath); err != nil {
-		b.log.Warn("couldn't save state", "error", err)
 	}
 }

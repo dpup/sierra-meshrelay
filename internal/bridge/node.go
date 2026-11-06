@@ -182,6 +182,8 @@ func (b *Bridge) nodeDown(reason string, err error) {
 func nodeErrorText(err error) string {
 	var ne net.Error
 	switch {
+	case errors.Is(err, nodelink.ErrNodeNotFound):
+		return "no node found on this network"
 	case errors.Is(err, nodelink.ErrNotConfigured):
 		return "no node address configured"
 	case errors.Is(err, companion.ErrFrameTooLarge):

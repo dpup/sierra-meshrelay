@@ -36,6 +36,7 @@ The differences:
 ## Docs
 
 - [PROTOCOL.md](PROTOCOL.md): the wire protocol. It's the canonical spec, and the Go types in `meshproto/` are tested against its examples.
+- [docs/linux.md](docs/linux.md): run a long-lived bridge on Linux as a systemd service (download, setup, install, status, upgrade).
 - [docs/relay.md](docs/relay.md): the relay's service spec, design decisions and deployment requirements.
 - [docs/mesh-bridge-handoff.md](docs/mesh-bridge-handoff.md): the bridge's design and milestones.
 
@@ -51,9 +52,13 @@ Bridge: `setup` (pairing), `status`, `pause` and `resume` work over a loopback c
 
 ## Running
 
+On a Linux box, follow [docs/linux.md](docs/linux.md): download a release, then `sudo meshbridge setup && sudo meshbridge install`.
+
+From source:
+
 ```sh
 make build
-./bin/meshbridge setup -config meshbridge.local.toml -host 192.168.1.50   # pair: passphrase or pairing code
+./bin/meshbridge setup -config meshbridge.local.toml          # finds the node on the LAN; pairs by passphrase or code
 ./bin/meshbridge run -config meshbridge.local.toml
 ```
 
@@ -110,10 +115,12 @@ Live-test rules:
 | `cmd/fakenode` | A standalone fake companion node |
 | `internal/bridge` | Node manager, relay session, reconnect backoff |
 | `internal/companion` | Companion framing and the identity check (verified against MeshCore companion-v1.18.0) |
-| `internal/nodelink` | Node link interface and TCP link |
+| `internal/nodelink` | Node link interface, TCP link, and LAN rediscovery of WiFi nodes |
 | `internal/relayclient` | Client side of the relay protocol |
 | `internal/connect` | `meshbridge connect`: local TCP companion port ↔ relay lease |
 | `internal/control` | The bridge's local control API (status, pause, resume) and its client |
+| `internal/svc` | Service install (systemd) |
+| `internal/state` | The bridge's `state.json` (pause until resumed, last node address) |
 | `internal/pairing` | The bridge side of pairing |
 | `internal/relaytest`, `internal/fakenode` | Test doubles: a scripted relay and a fake node |
 | `e2e` | End-to-end tests: local (real relay in process) and live (production relay) |

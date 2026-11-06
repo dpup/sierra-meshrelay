@@ -1,0 +1,85 @@
+# Running meshbridge on Linux
+
+This runs a long-lived bridge as a systemd service on any Linux machine on the same network as a WiFi (or Ethernet) MeshCore companion node. The machine can be x86-64, arm64 or a Raspberry Pi. USB nodes need serial support, which isn't built yet.
+
+## 1. Download
+
+```sh
+curl -LO https://github.com/dpup/sierra-meshrelay/releases/latest/download/meshbridge_linux_amd64.tar.gz
+tar xzf meshbridge_linux_amd64.tar.gz
+./meshbridge version
+```
+
+Use `meshbridge_linux_arm64` for a 64-bit Pi, or `armv7`/`armv6` for 32-bit Raspberry Pi OS. Checksums are in `SHA256SUMS` on the same release.
+
+## 2. Pair with SIERRA
+
+```sh
+sudo ./meshbridge setup
+```
+
+Setup scans this machine's network for a node on port 5000 and runs its identity check. If it finds more than one node, it asks which is yours. To point it at an address yourself, use `-host 192.168.1.50`.
+
+It then asks for a passphrase from your SIERRA contact. If you have one, type it in any case, with spaces or hyphens. Otherwise press Enter to get a pairing code, and text that code to your SIERRA contact.
+
+Once approved, setup writes `/etc/meshbridge/meshbridge.toml` (mode 0600, root only). That file holds the bridge's token and the node's pubkey.
+
+## 3. Install the service
+
+```sh
+sudo ./meshbridge install
+```
+
+This copies the binary to `/usr/local/bin/meshbridge` and writes `/etc/systemd/system/meshbridge.service`, then enables and starts the service.
+
+The service starts at boot after the network is up, and restarts 5 s after any exit. It runs as root, but sandboxed: everything is read-only except `/etc/meshbridge`, home directories aren't visible to it, and it can't gain privileges.
+
+## 4. Check on it
+
+```sh
+sudo meshbridge status            # green / amber / red, node, last traffic, pause state
+journalctl -u meshbridge -f       # logs (never frame payloads)
+systemctl status meshbridge
+```
+
+`status` needs `sudo`, because it reads the control secret in `/etc/meshbridge/control.token`.
+
+## Pausing
+
+```sh
+sudo meshbridge pause 1h          # or: tomorrow (08:00), until-resumed
+sudo meshbridge resume
+```
+
+Pausing frees the node's single connection, so you can use your own MeshCore app. SIERRA clients are told the gateway is paused until the time you gave. A pause with `until-resumed` survives restarts and reboots; a timed pause doesn't.
+
+## When the node's address changes
+
+The node gets its address from your router by DHCP. If that address changes, the bridge tries, in order:
+
+1. the configured address,
+2. the last address that worked (saved in `/etc/meshbridge/state.json`),
+3. a scan of the local network for the node with the pubkey in its config.
+
+It scans at most once a minute. If the node is on a different subnet from the bridge, set `node.tcp_host` in the config, or reserve the node's address on your router.
+
+## Upgrading
+
+Download the new release and run `sudo ./meshbridge install` again. That replaces the binary and restarts the service. The config, token and state stay as they are.
+
+## Removing
+
+```sh
+sudo meshbridge uninstall         # stops and removes the service; keeps /etc/meshbridge
+sudo rm -r /etc/meshbridge        # only if this machine is leaving SIERRA (ask your contact to remove the gateway)
+```
+
+## Troubleshooting
+
+| You see | Do |
+|---|---|
+| `status` is red, "Can't reach SIERRA" | Check the machine's internet. The bridge keeps retrying with backoff, up to 1 min apart. |
+| Red, "SIERRA didn't accept this bridge's credentials" | The token was rotated or revoked. Ask your SIERRA contact, then `sudo meshbridge setup -repair`. The bridge waits 15 min between attempts, so it doesn't trip the relay's lockout. |
+| Red, "This isn't the node SIERRA expects" | A different node answered. Check the right node is on and on this network. |
+| Amber, "your node isn't connected" | The node is off, out of WiFi range, or another app is connected to it (a node allows one connection). The logs show what the bridge tried. |
+| `install`: "systemd (systemctl) not found" | Run `meshbridge run -config /etc/meshbridge/meshbridge.toml` under your own supervisor instead. |

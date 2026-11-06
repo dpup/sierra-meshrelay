@@ -1,0 +1,29 @@
+name: release
+
+# Pushing a v* tag builds meshbridge for every target and publishes a GitHub
+# release with the archives and SHA256SUMS.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: make test
+      - name: Build archives
+        run: sh scripts/dist.sh "$GITHUB_REF_NAME"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
