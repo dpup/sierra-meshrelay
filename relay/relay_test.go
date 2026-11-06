@@ -925,3 +925,67 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// chanHolder is an in-process lease holder, as an internal poller would be.
+type chanHolder struct {
+	frames chan []byte
+	ended  chan string
+}
+
+func newChanHolder() *chanHolder {
+	return &chanHolder{frames: make(chan []byte, 8), ended: make(chan string, 1)}
+}
+
+func (h *chanHolder) Deliver(f []byte) {
+	select {
+	case h.frames <- f:
+	default:
+	}
+}
+func (h *chanHolder) Notify(any) {}
+func (h *chanHolder) End(reason string) {
+	select {
+	case h.ended <- reason:
+	default:
+	}
+}
+
+// An in-process holder takes a background lease, exchanges frames through
+// Send/Deliver, and gives way to a human session.
+func TestInProcessHolderSendAndPreempt(t *testing.T) {
+	h := newHarness(t, Config{})
+	tok := h.createGateway("gw-a")
+	b := h.bridge("gw-a", tok, pubkeyA)
+
+	poller := newChanHolder()
+	l, err := h.relay.Acquire(LeaseRequest{Gateway: "gw-a", Client: "poller", Role: RoleAgent,
+		Priority: PriorityBackground, Holder: poller})
+	require.NoError(t, err)
+	b.expect("attach")
+
+	require.NoError(t, h.relay.Send(l, []byte{0x38, 0x00}))
+	select {
+	case f := <-poller.frames:
+		assert.Equal(t, []byte{0x80, 0x38, 0x00}, f)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no frame delivered to the in-process holder")
+	}
+	assert.ErrorIs(t, h.relay.Send(l, make([]byte, MaxFrameBytes+1)), ErrFrameTooLarge)
+
+	// A normal-priority client preempts the background lease.
+	op := h.createClient("op", RoleOperator)
+	c := h.client("gw-a", op, "")
+	expectControl(t, c, "lease")
+	select {
+	case reason := <-poller.ended:
+		assert.Equal(t, ReasonPreempted, reason)
+	case <-time.After(2 * time.Second):
+		t.Fatal("background lease was not preempted")
+	}
+	assert.ErrorIs(t, h.relay.Send(l, []byte{0x01}), ErrLeaseEnded)
+
+	// And while the human holds it, the poller is refused.
+	_, err = h.relay.Acquire(LeaseRequest{Gateway: "gw-a", Client: "poller", Role: RoleAgent,
+		Priority: PriorityBackground, Holder: newChanHolder()})
+	assert.ErrorIs(t, err, ErrBusy)
+}

@@ -108,7 +108,7 @@ Two options. Leave room for both in the design.
 
 ## Phase 3 (later): polling and telemetry
 
-The relay will run its own internal client that takes short leases to poll repeaters for status, telemetry, and neighbours, and stores the results. Build the lease manager so an internal client can hold a lease just like an external one, with a priority flag so polling can wait for a human session. Nothing else is needed for this now.
+The relay will run its own internal client that takes short leases to poll repeaters for status, telemetry, and neighbours, and stores the results. Build the lease manager so an internal client can hold a lease just like an external one, with a priority flag so polling can wait for a human session. Nothing else is needed for this now. (Built: an in-process holder implements `LeaseHolder`, takes the lease with `Acquire` at `PriorityBackground`, and sends frames with `Relay.Send`. sierra-data's `cmd/mesh-relay` runs the first such poller.)
 
 ## Acceptance tests for phase 1
 

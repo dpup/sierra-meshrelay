@@ -416,8 +416,9 @@ func (r *Relay) shutdown() {
 
 // --- leases -----------------------------------------------------------------
 
-// LeaseHolder is whoever holds a lease: an external websocket client today,
-// the phase-3 internal poller later. Methods are called with the relay mutex
+// LeaseHolder is whoever holds a lease: an external websocket client, or a
+// holder inside the relay's process (an internal poller), which sends frames
+// with Relay.Send. Methods are called with the relay mutex
 // held, so they must not block or call back into the relay.
 type LeaseHolder interface {
 	// Deliver hands over one frame from the node.
@@ -644,6 +645,28 @@ func (r *Relay) EndLeasesFor(client, reason string) int {
 }
 
 // --- frames -----------------------------------------------------------------
+
+// ErrLeaseEnded means a frame could not be sent because the lease is no
+// longer the gateway's active lease, or its bridge stopped accepting frames.
+var ErrLeaseEnded = errors.New("lease ended")
+
+// ErrFrameTooLarge means a frame is over MaxFrameBytes.
+var ErrFrameTooLarge = errors.New("frame too large")
+
+// Send forwards one companion frame payload to the node, as a websocket
+// client's binary message would be. It is for lease holders inside the relay's
+// process (an internal poller), which have no socket to write to. It applies
+// the frame size limit but not the per-connection rate limit: the caller paces
+// itself. Frames from the node arrive through the holder's Deliver.
+func (r *Relay) Send(l *Lease, frame []byte) error {
+	if len(frame) > MaxFrameBytes {
+		return ErrFrameTooLarge
+	}
+	if !r.toNode(l, frame) {
+		return ErrLeaseEnded
+	}
+	return nil
+}
 
 // toNode forwards a frame from the lease holder to its gateway's bridge.
 func (r *Relay) toNode(l *Lease, frame []byte) bool {

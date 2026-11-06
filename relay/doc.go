@@ -57,7 +57,8 @@
 // forwarding. Security-relevant writes (pubkey pinning, token changes) are
 // synchronous and happen outside the mutex.
 //
-// A lease holder is an interface (LeaseHolder), not a websocket, so the
-// phase-3 internal poller can hold a lease exactly like an external client,
-// at a lower Priority that a human session preempts.
+// A lease holder is an interface (LeaseHolder), not a websocket, so an
+// internal poller in the relay's process can hold a lease exactly like an
+// external client: Acquire at PriorityBackground (any human session preempts
+// it), Send frames to the node, receive them through Deliver, Release.
 package relay
