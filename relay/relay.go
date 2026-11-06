@@ -65,6 +65,9 @@ type Config struct {
 	// to stop admitting new work (sierra-data passes its handoff gate). Nil
 	// means always open.
 	Gate Gate
+	// ReleaseBaseURL is where bridges download updates from (default
+	// DefaultReleaseBaseURL); the offer's URL is <base>/<version>.
+	ReleaseBaseURL string
 	// SecretKey (32 bytes) seals secrets the relay must be able to read back:
 	// shared repeaters' passwords. Without it, repeaters can't be shared.
 	SecretKey []byte

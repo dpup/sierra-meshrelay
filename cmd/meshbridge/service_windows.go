@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,8 +15,10 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 
+	"github.com/dpup/sierra-meshrelay/internal/config"
 	"github.com/dpup/sierra-meshrelay/internal/logfile"
 	msvc "github.com/dpup/sierra-meshrelay/internal/svc"
+	"github.com/dpup/sierra-meshrelay/internal/update"
 )
 
 // LogFile is the service's log, beside its config.
@@ -119,3 +122,55 @@ const (
 	installHint = "meshbridge install, as administrator"
 	setupHint   = "meshbridge setup, as administrator"
 )
+
+// applyStaged marks a staged update ready. The service's account can't
+// write Program Files, so the "SIERRA meshbridge update" scheduled task
+// (SYSTEM, every few minutes) installs it: see cmdApplyUpdate.
+func applyStaged(u *autoUpdater) {
+	if err := update.MarkReady(u.dir); err != nil {
+		u.log.Error("can't mark the update ready", "error", err)
+		return
+	}
+	u.log.Info("update ready; Windows installs it within a few minutes (scheduled task)")
+}
+
+// cmdApplyUpdate, run by the scheduled task as SYSTEM, installs an update
+// the bridge has staged and marked ready: stop the service, swap the binary,
+// start it again. It writes what it did to the service's log.
+func cmdApplyUpdate(args []string) error {
+	fs := flag.NewFlagSet("apply-update", flag.ExitOnError)
+	path := fs.String("config", config.DefaultPath(), "bridge config file")
+	_ = fs.Parse(args)
+	dir := filepath.Dir(*path)
+	staged, ready := update.Staged(dir)
+	if !ready {
+		return nil
+	}
+	out, err := logfile.Open(filepath.Join(dir, LogFile))
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	say := func(level, msg string, kv ...any) {
+		fmt.Fprintf(out, "time=%s level=%s msg=%q", time.Now().Format(time.RFC3339), level, msg)
+		for i := 0; i+1 < len(kv); i += 2 {
+			fmt.Fprintf(out, " %v=%q", kv[i], fmt.Sprint(kv[i+1]))
+		}
+		fmt.Fprintln(out)
+	}
+	if err := msvc.StopService(); err != nil {
+		say("ERROR", "update: can't stop the service; will retry", "error", err)
+		return nil
+	}
+	v, err := update.Apply(dir, msvc.BinaryPath(), version, nil)
+	switch {
+	case err != nil:
+		say("ERROR", "update not installed", "version", staged, "error", err)
+	case v != "":
+		say("INFO", "update installed", "version", v, "was", version)
+	}
+	if err := msvc.StartService(); err != nil {
+		say("ERROR", "update: can't start the service again", "error", err)
+	}
+	return nil
+}

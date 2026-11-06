@@ -118,6 +118,7 @@ meshbridge admin approve K7M-4QX           # named after the node; or: approve K
 meshbridge admin invite                    # a passphrase and a ready-to-send message, for hosts you expect
 meshbridge admin gateways                  # what's online
 meshbridge admin logs jay-murphys -f       # a bridge's own log lines, sent to the relay (never messages)
+meshbridge admin update-bridges v0.7.1 -gateway my-test-box   # roll a release out (canary first, then without -gateway)
 meshbridge admin repeaters                 # shared repeaters, last read, problems
 ```
 

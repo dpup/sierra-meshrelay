@@ -288,3 +288,24 @@ func (c *Client) Logs(ctx context.Context, gateway string, after int64, limit in
 	err := c.do(ctx, http.MethodGet, "/gateways/"+url.PathEscape(gateway)+"/logs?"+q.Encode(), nil, &out)
 	return out.Logs, out.Events, err
 }
+
+// BridgeUpdate is the release the relay offers bridges.
+type BridgeUpdate struct {
+	Version  string   `json:"version"`
+	Gateways []string `json:"gateways,omitempty"`
+}
+
+// GetBridgeUpdate returns the release the relay offers bridges.
+func (c *Client) GetBridgeUpdate(ctx context.Context) (BridgeUpdate, error) {
+	var out BridgeUpdate
+	return out, c.do(ctx, http.MethodGet, "/bridge-update", nil, &out)
+}
+
+// SetBridgeUpdate sets the release to offer ("" stops offering), and
+// returns the gateways it was offered to right away.
+func (c *Client) SetBridgeUpdate(ctx context.Context, u BridgeUpdate) ([]string, error) {
+	var out struct {
+		Offered []string `json:"offered"`
+	}
+	return out.Offered, c.do(ctx, http.MethodPut, "/bridge-update", u, &out)
+}

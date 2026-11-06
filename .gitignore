@@ -4,3 +4,4 @@
 /dist/
 *.local.toml
 docs/live-testing.md
+/.secrets/

@@ -77,6 +77,8 @@ func (r *Relay) ServerOptions() []prefab.ServerOption {
 		prefab.WithJSONHandler("POST "+api+"/invites", j(r.admin(r.apiCreateInvite))),
 		prefab.WithJSONHandler("DELETE "+api+"/invites/{id}", j(r.admin(r.apiRevokeInvite))),
 		prefab.WithJSONHandler("GET "+api+"/metrics", j(r.viewer(r.apiMetrics))),
+		prefab.WithJSONHandler("GET "+api+"/bridge-update", j(r.admin(r.apiGetBridgeUpdate))),
+		prefab.WithJSONHandler("PUT "+api+"/bridge-update", j(r.admin(r.apiSetBridgeUpdate))),
 
 		// Shared repeaters. Bridges manage their own under gateway/ with their
 		// bridge token; admins see and manage all of them.

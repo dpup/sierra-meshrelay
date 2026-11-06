@@ -27,6 +27,7 @@ Why this split:
 | `paused` | Done | Done (`meshbridge pause`/`resume`, local control API) | n/a |
 | Shared repeaters (`gateway/repeaters`) | Done | Done (`meshbridge repeater`) | n/a |
 | Bridge logs (`log`) | Done | Done (`host.send_logs`) | n/a |
+| Updates (`update_available`) | Done (`PUT /bridge-update`) | Done (signed releases; `host.auto_update`) | n/a |
 | Leave, diagnostics bundle | Not yet built | Not started | n/a |
 | Client tickets (browser auth) | Not yet built | n/a | Not started |
 | Client relay transport | n/a | `connect` shim done | Not started |
@@ -181,10 +182,12 @@ The bridge closes and reopens its connection to the node, then re-runs the ident
 ### `update_available` (relay → bridge, optional)
 
 ```json
-{ "type": "update_available", "version": "0.4.0", "url": "https://…", "sha256": "…", "sig": "base64 ed25519" }
+{ "type": "update_available", "version": "v0.7.0", "url": "https://github.com/dpup/sierra-meshrelay/releases/download/v0.7.0", "sha256": "", "sig": "" }
 ```
 
-v1 bridges may log this and do nothing else.
+The relay offers the release an admin chose (`PUT /bridge-update`) to each bridge running something else, when it connects and when the choice changes. `url` is the release's download directory. The relay doesn't vouch for it: the bridge downloads `SHA256SUMS` and `SHA256SUMS.sig` from there and installs only if the signature verifies against a release key built into the bridge, and the archive for its platform matches. The signature is ed25519 over `meshbridge release <version>\n` followed by `SHA256SUMS`, base64. `sha256` and `sig` are unused (empty).
+
+meshbridge installs only newer versions, only as an installed service, and only while no client is attached. A bridge may ignore the message (`host.auto_update = false`, or a bridge run by hand), and older bridges just log it.
 
 ### `log` (bridge → relay, optional)
 

@@ -104,7 +104,9 @@ It scans at most once a minute. If the node is on a different subnet from the br
 
 ## Upgrading
 
-Download the new release and run `sudo ./meshbridge install` again. That replaces the binary and restarts the service. The config, token and state stay as they are.
+Bridges update themselves (v0.7.0 and later): when SIERRA rolls out a release, the bridge downloads it, checks its signature against the release key built into meshbridge, waits until nobody is using the node, and restarts into it. The service installs it before starting (`ExecStartPre … apply-update`). The journal shows each step. To turn it off, set `auto_update = false` under `[host]` in the config.
+
+To upgrade by hand, run the installer again, or download the new release and run `sudo ./meshbridge install`. That replaces the binary and the unit, and restarts the service. The config, token and state stay as they are. A bridge installed before v0.7.0 needs this once to get the self-updating unit.
 
 ## Removing
 

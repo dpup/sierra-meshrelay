@@ -113,6 +113,9 @@ func Install(exe, configPath string) (Installed, error) {
 	if err := SecureConfigDir(filepath.Dir(configPath)); err != nil {
 		return Installed{}, err
 	}
+	if err := schtasks(updateTaskArgs(bin, configPath)...); err != nil {
+		return Installed{}, fmt.Errorf("creating the update task: %w", err)
+	}
 	if err := start(s); err != nil {
 		return Installed{}, fmt.Errorf("%w; see %s", err, filepath.Join(filepath.Dir(configPath), "meshbridge.log"))
 	}
@@ -138,7 +141,63 @@ func Uninstall() error {
 	if err := stop(s); err != nil {
 		return err
 	}
+	_ = schtasks("/Delete", "/TN", UpdateTask, "/F")
 	return s.Delete()
+}
+
+// UpdateTask is the scheduled task that installs staged updates. The
+// service's own account can't write Program Files (on purpose), so a task
+// running as SYSTEM does it: every 5 minutes it runs apply-update, which
+// does nothing unless the bridge has staged a verified update and marked it
+// ready.
+const UpdateTask = `SIERRA\meshbridge update`
+
+func updateTaskArgs(bin, configPath string) []string {
+	return []string{"/Create", "/TN", UpdateTask, "/TR", commandLine(bin, "apply-update", "-config", configPath),
+		"/SC", "MINUTE", "/MO", "5", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F"}
+}
+
+func schtasks(args ...string) error {
+	cmd := exec.Command("schtasks", args...)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(out.String()))
+	}
+	return nil
+}
+
+// StopService stops the installed service and waits for it.
+func StopService() error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(ServiceName)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	return stop(s)
+}
+
+// StartService starts the installed service.
+func StartService() error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(ServiceName)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	if err := s.Start(); err != nil {
+		return err
+	}
+	return waitFor(s, wsvc.Running, 30*time.Second)
 }
 
 // SecureConfigDir restricts dir to SYSTEM, Administrators and, once it

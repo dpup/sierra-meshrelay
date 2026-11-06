@@ -13,7 +13,10 @@ package e2e
 
 import (
 	"archive/zip"
+	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +30,10 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	msvc "github.com/dpup/sierra-meshrelay/internal/svc"
+	"github.com/dpup/sierra-meshrelay/internal/update"
+	"github.com/dpup/sierra-meshrelay/relay"
 )
 
 func requireAdmin(t *testing.T) {
@@ -43,14 +50,43 @@ func fakeWindowsRelease(t *testing.T) (dir, asset string) {
 	asset = "meshbridge_windows_" + runtime.GOARCH + ".zip"
 	stage := t.TempDir()
 	exe := filepath.Join(stage, "meshbridge.exe")
-	build := exec.Command("go", "build", "-ldflags", "-X main.version=v9.9.9", "-o", exe, "./cmd/meshbridge")
-	build.Dir = ".."
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	winBuild(t, exe, "v9.9.9")
 	dir = t.TempDir()
 	d := filepath.Join(dir, "latest", "download")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeZip(t, d, asset, exe, "v9.9.9")
+	// An update for the service test: download/v9.9.10/, signed.
+	exe2 := filepath.Join(stage, "v9.9.10", "meshbridge.exe")
+	winBuild(t, exe2, "v9.9.10")
+	writeZip(t, filepath.Join(dir, "download", "v9.9.10"), asset, exe2, "v9.9.10")
+
+	script, _ := os.ReadFile("../scripts/install.ps1")
+	if err := os.WriteFile(filepath.Join(dir, "install.ps1"), script, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, asset
+}
+
+// winTestKey signs test releases; the test binaries trust it.
+var winTestKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+
+func winBuild(t *testing.T, out, version string) {
+	t.Helper()
+	pub := base64.StdEncoding.EncodeToString(winTestKey.Public().(ed25519.PublicKey))
+	build := exec.Command("go", "build", "-ldflags", "-X main.version="+version+
+		" -X github.com/dpup/sierra-meshrelay/internal/update.extraKey="+pub, "-o", out, "./cmd/meshbridge")
+	build.Dir = ".."
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if b, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, b)
+	}
+}
+
+// writeZip writes a release directory: the zip, SHA256SUMS and its signature.
+func writeZip(t *testing.T, d, asset, exe, version string) {
+	t.Helper()
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -68,14 +104,13 @@ func fakeWindowsRelease(t *testing.T) (dir, asset string) {
 	zf.Close()
 	archive, _ := os.ReadFile(filepath.Join(d, asset))
 	sum := sha256.Sum256(archive)
-	if err := os.WriteFile(filepath.Join(d, "SHA256SUMS"), []byte(hex.EncodeToString(sum[:])+"  "+asset+"\n"), 0o644); err != nil {
+	sums := []byte(hex.EncodeToString(sum[:]) + "  " + asset + "\n")
+	if err := os.WriteFile(filepath.Join(d, "SHA256SUMS"), sums, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script, _ := os.ReadFile("../scripts/install.ps1")
-	if err := os.WriteFile(filepath.Join(dir, "install.ps1"), script, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(d, "SHA256SUMS.sig"), []byte(update.Sign(winTestKey, version, sums)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return dir, asset
 }
 
 type winEnv struct {
@@ -214,7 +249,7 @@ func TestWindowsService(t *testing.T) {
 		t.Skip("installs a real Windows service; set MESHBRIDGE_WINDOWS_SERVICE_TEST=1 on a throwaway machine")
 	}
 	env, _ := newWinEnv(t)
-	lr := startRelay(t)
+	lr := startRelay(t, func(c *relay.Config) { c.ReleaseBaseURL = env.baseURL + "/download" })
 	node := startNode(t, "Service Node")
 	phrase, _ := lr.invite(map[string]any{"gateway": "win-svc"})
 	installed := filepath.Join(os.Getenv("ProgramFiles"), "SIERRA", "meshbridge", "meshbridge.exe")
@@ -274,10 +309,48 @@ func TestWindowsService(t *testing.T) {
 	}
 	waitConnected(t, lr, "win-svc", true, 60*time.Second)
 
+	// Auto-update: the relay offers v9.9.10; the service downloads and
+	// verifies it and marks it ready; the update task (run now, rather than
+	// waiting up to 5 minutes) stops the service, swaps the binary, starts it.
+	if code := lr.api("PUT", "/bridge-update", map[string]any{"version": "v9.9.10"}, nil); code != 200 {
+		t.Fatalf("offer update: HTTP %d", code)
+	}
+	ready := filepath.Join(filepath.Dir(env.config()), "update", "ready")
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the service never staged the update")
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if out, err := exec.Command("schtasks", "/Run", "/TN", msvc.UpdateTask).CombinedOutput(); err != nil {
+		t.Fatalf("schtasks /Run: %v\n%s", err, out)
+	}
+	deadline = time.Now().Add(120 * time.Second)
+	for {
+		d := lr.gateway("win-svc")
+		if connected(d) && d.Agent != nil && d.Agent.Version == "v9.9.10" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the update wasn't installed: %+v", d)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if out, _ := exec.Command(installed, "version").Output(); !strings.Contains(string(out), "v9.9.10") {
+		t.Fatalf("installed binary: %s", out)
+	}
+
 	if out, err := exec.Command(installed, "uninstall").CombinedOutput(); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
 	waitConnected(t, lr, "win-svc", false, 30*time.Second)
+	if out, err := exec.Command("schtasks", "/Query", "/TN", msvc.UpdateTask).CombinedOutput(); err == nil {
+		t.Fatalf("uninstall left the update task:\n%s", out)
+	}
 }
 
 func waitConnected(t *testing.T, lr *localRelay, gateway string, want bool, timeout time.Duration) {

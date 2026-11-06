@@ -29,6 +29,8 @@ Usage:
   meshbridge admin revoke <invite-id>            Revoke an invite
   meshbridge admin gateways                      Gateways and their status
   meshbridge admin logs <gateway> [-n 50] [-f]   A bridge's recent log lines and connects/disconnects
+  meshbridge admin update-bridges [vX.Y.Z|off] [-gateway a,b]
+                                                 Offer bridges a release (they install it when idle)
   meshbridge admin repeaters                     Shared repeaters and their last reading
   meshbridge admin repeater add <pubkey> <gateway>
                                                  Share a repeater, checking its password through <gateway>
@@ -56,6 +58,7 @@ func cmdAdmin(args []string) error {
 	note := fs.String("note", "", "invite: a note for admins")
 	lines := fs.Int("n", 50, "logs: how many lines")
 	follow := fs.Bool("f", false, "logs: keep printing new lines")
+	only := fs.String("gateway", "", "update-bridges: only these gateways (comma-separated)")
 	pos := parseInterleaved(fs, args)
 
 	tok, err := admin.LoadToken(*tokenFile)
@@ -222,6 +225,42 @@ func cmdAdmin(args []string) error {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", g.Name, bridge, node, version, seen, inUse)
 		}
 		w.Flush()
+		return nil
+
+	case "update-bridges":
+		if arg(0) == "" {
+			u, err := c.GetBridgeUpdate(ctx)
+			if err != nil {
+				return err
+			}
+			switch {
+			case u.Version == "":
+				fmt.Println("Not offering bridges an update.")
+			case len(u.Gateways) > 0:
+				fmt.Printf("Offering %s to %s.\n", u.Version, strings.Join(u.Gateways, ", "))
+			default:
+				fmt.Printf("Offering %s to every bridge.\n", u.Version)
+			}
+			return nil
+		}
+		u := admin.BridgeUpdate{Version: arg(0)}
+		if u.Version == "off" {
+			u.Version = ""
+		}
+		if *only != "" {
+			u.Gateways = strings.Split(*only, ",")
+		}
+		offered, err := c.SetBridgeUpdate(ctx, u)
+		if err != nil {
+			return err
+		}
+		if u.Version == "" {
+			fmt.Println("Stopped offering bridges an update.")
+			return nil
+		}
+		fmt.Printf("Offering %s. Sent now to: %s\n", u.Version, dashList(offered))
+		fmt.Println("Each bridge verifies the release's signature, waits until nobody is using its node, then")
+		fmt.Println("installs it (bridges installed before v0.7.0 need the installer run once). Watch with: meshbridge admin gateways")
 		return nil
 
 	case "logs":
@@ -406,4 +445,11 @@ func formatLog(l admin.BridgeLog) string {
 		fmt.Fprintf(&b, " %s=%s", k, v)
 	}
 	return b.String()
+}
+
+func dashList(s []string) string {
+	if len(s) == 0 {
+		return "(none online that need it)"
+	}
+	return strings.Join(s, ", ")
 }

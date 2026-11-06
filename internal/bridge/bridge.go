@@ -50,6 +50,10 @@ type Options struct {
 	// Diag holds recent log lines to send to the relay (`log` messages), so
 	// SIERRA admins can see why a bridge is stuck. Nil sends none.
 	Diag *diaglog.Ring
+
+	// OnUpdate is called (on its own goroutine) when the relay offers a
+	// bridge update. Nil only logs it.
+	OnUpdate func(meshproto.UpdateAvailable)
 }
 
 func (o *Options) defaults() {
@@ -257,4 +261,12 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// Idle reports whether no client is using the node.
+func (b *Bridge) Idle() bool {
+	b.mu.Lock()
+	s := b.session
+	b.mu.Unlock()
+	return s == nil || !s.isAttached()
 }

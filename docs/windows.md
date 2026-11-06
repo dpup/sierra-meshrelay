@@ -103,7 +103,9 @@ SIERRA then logs in to the repeater over the mesh to read its status (battery, a
 
 ## Upgrading
 
-Run the installer again. Or download the new release and run `.\meshbridge.exe install` from it, which stops the service, replaces the binary and starts it.
+Bridges update themselves (v0.7.0 and later): when SIERRA rolls out a release, the service downloads it, checks its signature against the release key built into meshbridge, and once nobody is using the node marks it ready. A scheduled task, `SIERRA\meshbridge update`, runs every 5 minutes as SYSTEM, and installs a ready update: it stops the service, swaps the binary and starts it again. The log shows each step. To turn it off, set `auto_update = false` under `[host]` in the config.
+
+To upgrade by hand, run the installer again. Or download the new release and run `.\meshbridge.exe install` from it, which stops the service, replaces the binary and starts it.
 
 ## Removing
 

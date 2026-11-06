@@ -50,6 +50,9 @@ type Host struct {
 	// SendLogs sends the bridge's recent log lines (never message content)
 	// to the relay, where SIERRA admins can read them to help.
 	SendLogs bool `toml:"send_logs"`
+	// AutoUpdate installs signed bridge updates SIERRA offers, when nobody
+	// is using the node (installed service only).
+	AutoUpdate bool `toml:"auto_update"`
 }
 
 // Log configures logging.
@@ -66,7 +69,7 @@ func Default() Config {
 	return Config{
 		Relay: DefaultRelay,
 		Node:  Node{Link: LinkAuto, Baud: 115200, TCPPort: 5000},
-		Host:  Host{KeepAwake: true, SendLogs: true},
+		Host:  Host{KeepAwake: true, SendLogs: true, AutoUpdate: true},
 		Log:   Log{Level: "info"},
 	}
 }

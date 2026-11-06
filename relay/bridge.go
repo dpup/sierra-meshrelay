@@ -121,6 +121,7 @@ func (r *Relay) serveBridge(s *bridgeSession, ip string) {
 	}
 	logging.Infow(ctx, "bridge connected", "ip", ip, "agent", h.Agent.Name, "version", h.Agent.Version,
 		"os", h.Agent.OS, "arch", h.Agent.Arch, "link", h.Link.Kind, "node_state", h.Node.State)
+	r.offerUpdate(s, h.Agent.Version)
 
 	reason := r.bridgeLoop(s)
 	if r.detachBridge(s) {

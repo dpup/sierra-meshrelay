@@ -27,6 +27,11 @@ const (
 // state.json), with no access to home directories and no privilege
 // escalation. Restart=always with a short delay keeps a long-lived bridge up
 // through crashes; the bridge itself handles network and node outages.
+//
+// Updates: the sandboxed bridge can't replace its own binary, so it stages
+// a verified release in the config directory and exits. ExecStartPre then
+// runs apply-update with full privileges ("+") before the next start; it
+// re-verifies the release's signature and never fails the start ("-").
 func Unit(binary, configPath string) string {
 	dir := filepath.Dir(configPath)
 	return fmt.Sprintf(`# Installed by "meshbridge install". Reinstall to update; "meshbridge uninstall" to remove.
@@ -39,7 +44,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=%s run -config %s
+ExecStartPre=-+%s apply-update -config %s
+ExecStart=%s run -service -config %s
 Restart=always
 RestartSec=5
 TimeoutStopSec=15
@@ -59,7 +65,7 @@ SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
-`, quote(binary), quote(configPath), quote(dir))
+`, quote(binary), quote(configPath), quote(binary), quote(configPath), quote(dir))
 }
 
 // quote escapes a path for a systemd unit line.

@@ -272,11 +272,15 @@ func (b *Bridge) handleControl(s *session, data []byte) {
 	case meshproto.TypeRelink:
 		b.Relink()
 	case meshproto.TypeUpdateAvailable:
-		var m struct {
-			Version string `json:"version"`
+		var m meshproto.UpdateAvailable
+		if json.Unmarshal(data, &m) != nil {
+			return
 		}
-		_ = json.Unmarshal(data, &m)
-		b.log.Info("relay reports an update is available", "version", m.Version)
+		if b.opts.OnUpdate != nil {
+			go b.opts.OnUpdate(m)
+		} else {
+			b.log.Info("relay reports an update is available", "version", m.Version)
+		}
 	case meshproto.TypeError:
 		b.logRelayError(data)
 	}

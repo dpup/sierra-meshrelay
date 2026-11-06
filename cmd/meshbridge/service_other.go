@@ -4,8 +4,15 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+
+	"github.com/dpup/sierra-meshrelay/internal/config"
+	"github.com/dpup/sierra-meshrelay/internal/update"
 )
 
 // underServiceManager reports whether the Windows service manager started
@@ -22,3 +29,37 @@ const (
 	installHint = "sudo meshbridge install"
 	setupHint   = "sudo meshbridge setup"
 )
+
+// applyStaged gets a staged update installed. The systemd unit installs it
+// before the service starts (ExecStartPre runs apply-update as root, outside
+// the sandbox), so the bridge only has to exit.
+func applyStaged(u *autoUpdater) {
+	if u.restart != nil {
+		u.restart()
+	}
+}
+
+// cmdApplyUpdate installs a staged update over this binary. systemd runs it
+// before every start; it never fails, so a bad update can't keep the bridge
+// from starting.
+func cmdApplyUpdate(args []string) error {
+	fs := flag.NewFlagSet("apply-update", flag.ExitOnError)
+	path := fs.String("config", config.DefaultPath(), "bridge config file")
+	_ = fs.Parse(args)
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "meshbridge: update not installed:", err)
+		return nil
+	}
+	v, err := update.Apply(filepath.Dir(*path), exe, version, nil)
+	switch {
+	case err != nil:
+		fmt.Fprintln(os.Stderr, "meshbridge: update not installed:", err)
+	case v != "":
+		fmt.Printf("meshbridge: installed %s (was %s)\n", v, version)
+	}
+	return nil
+}

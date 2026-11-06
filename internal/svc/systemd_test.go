@@ -12,7 +12,8 @@ import (
 func TestUnit(t *testing.T) {
 	u := Unit("/usr/local/bin/meshbridge", "/etc/meshbridge/meshbridge.toml")
 	for _, want := range []string{
-		"ExecStart=/usr/local/bin/meshbridge run -config /etc/meshbridge/meshbridge.toml\n",
+		"ExecStart=/usr/local/bin/meshbridge run -service -config /etc/meshbridge/meshbridge.toml\n",
+		"ExecStartPre=-+/usr/local/bin/meshbridge apply-update -config /etc/meshbridge/meshbridge.toml\n",
 		"ReadWritePaths=/etc/meshbridge\n",
 		"After=network-online.target\n",
 		"Restart=always\n",
@@ -23,7 +24,7 @@ func TestUnit(t *testing.T) {
 			t.Errorf("unit lacks %q:\n%s", want, u)
 		}
 	}
-	if q := Unit("/opt/my bin/meshbridge", "/srv/a b/c.toml"); !strings.Contains(q, `ExecStart="/opt/my bin/meshbridge" run -config "/srv/a b/c.toml"`) ||
+	if q := Unit("/opt/my bin/meshbridge", "/srv/a b/c.toml"); !strings.Contains(q, `ExecStart="/opt/my bin/meshbridge" run -service -config "/srv/a b/c.toml"`) ||
 		!strings.Contains(q, `ReadWritePaths="/srv/a b"`) {
 		t.Errorf("paths with spaces not quoted:\n%s", q)
 	}

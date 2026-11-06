@@ -115,7 +115,7 @@ func OpenStore(ctx context.Context, path string, lockTimeout time.Duration) (*St
 	}
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
-	if _, err := db.Exec(schema + repeaterSchema + bridgeLogSchema); err != nil {
+	if _, err := db.Exec(schema + repeaterSchema + bridgeLogSchema + settingsSchema); err != nil {
 		db.Close()
 		lock.Close()
 		return nil, fmt.Errorf("relay store: migrate: %w", err)

@@ -68,6 +68,7 @@ JSON over HTTPS under `/mesh/relay/api/`. Requires an `admin` or `operator` toke
 | `POST /pairings/<code>/deny` | Refuse a code; the bridge's next poll reads `denied` |
 | `POST /invites` `{gateway? \| name_prefix?, max_uses?, expires_in_hours? \| expires_at?, expected_pubkey?, note?}` | Create a passphrase invite. Returns the passphrase and a `sierramesh://` link **once**. `gateway` names it (single use). `name_prefix` names gateways `<prefix>-1`, `-2`… (up to 100 uses). With neither, each gateway is named after its node when redeemed. Expires in 7 days by default, 30 at most. |
 | `GET /invites` / `DELETE /invites/<id>` | List invites (never the passphrase) / revoke one. Revoking doesn't touch gateways already created from it. |
+| `GET /bridge-update` / `PUT /bridge-update` `{version, gateways?}` | The release bridges should run, offered with `update_available` (see PROTOCOL.md). `gateways` limits it (a canary first); `version: ""` stops offering. `PUT` answers with the gateways it was sent to right away. Config `ReleaseBaseURL` says where releases live. |
 | `GET /repeaters` | Shared repeaters (never a password): name, access (`guest`/`admin`), who shared it, last successful read, the gateway it came through, the last problem |
 | `POST /repeaters` `{pubkey, gateway, password, name?}` | Share a repeater. The relay logs in to it through `gateway`'s node and reads its status first; the password is stored only if that works. |
 | `DELETE /repeaters/<pubkey>` | Stop sharing a repeater and delete its password |
@@ -84,7 +85,7 @@ A minimal read-only status page (gateways, online/offline, last seen) is a nice-
 - **Notifications:** each redemption or approval adds a `paired` or `repaired` gateway event and logs at warn level with the source IP and host label, so admins can spot one they didn't expect.
 - **`Config.PublicBaseURL`** (default `https://data.sierragridteam.org`) builds the `verification_url` and the `relay` URL handed to a paired bridge.
 - **Not built yet:** the approval page at `/mesh/pair`, which `verification_url` points to. Admins approve with `meshbridge admin` (below) or the API.
-- **`meshbridge admin`** wraps these endpoints for admins: `pairings`, `approve <code> [gateway]`, `deny`, `invite [gateway]` (which prints a message to send the host, with the passphrase and the install one-liner), `invites`, `revoke` and `gateways`. `logs <gateway> [-n 50] [-f]` prints a bridge's recent log lines merged with the relay's connects and disconnects. It also covers shared repeaters: `repeaters`, `repeater add <pubkey> <gateway>`, `repeater remove`. It reads the admin token from `$MESHBRIDGE_ADMIN_TOKEN` or `~/.config/meshbridge/admin.token`.
+- **`meshbridge admin`** wraps these endpoints for admins: `pairings`, `approve <code> [gateway]`, `deny`, `invite [gateway]` (which prints a message to send the host, with the passphrase and the install one-liner), `invites`, `revoke` and `gateways`. `update-bridges [vX.Y.Z|off] [-gateway a,b]` sets the bridge release. `logs <gateway> [-n 50] [-f]` prints a bridge's recent log lines merged with the relay's connects and disconnects. It also covers shared repeaters: `repeaters`, `repeater add <pubkey> <gateway>`, `repeater remove`. It reads the admin token from `$MESHBRIDGE_ADMIN_TOKEN` or `~/.config/meshbridge/admin.token`.
 
 ### Shared repeaters (implementation)
 

@@ -1,7 +1,7 @@
 name: release
 
 # Pushing a v* tag builds meshbridge for every target and publishes a GitHub
-# release with the archives and SHA256SUMS.
+# release with the archives, SHA256SUMS and its signature (SHA256SUMS.sig).
 on:
   push:
     tags: ["v*"]
@@ -21,6 +21,10 @@ jobs:
         run: make test
       - name: Build archives
         run: sh scripts/dist.sh "$GITHUB_REF_NAME"
+      - name: Sign (for bridges' auto-update)
+        env:
+          MESHBRIDGE_RELEASE_SIGNING_KEY: ${{ secrets.MESHBRIDGE_RELEASE_SIGNING_KEY }}
+        run: go run ./cmd/signrelease "$GITHUB_REF_NAME" dist/SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

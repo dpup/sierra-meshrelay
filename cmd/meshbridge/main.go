@@ -85,6 +85,8 @@ func main() {
 		err = cmdUninstall(os.Args[2:])
 	case "find-node":
 		err = cmdFindNode(os.Args[2:])
+	case "apply-update": // run by the service (systemd ExecStartPre, Windows scheduled task)
+		err = cmdApplyUpdate(os.Args[2:])
 	case "version", "-version", "--version":
 		cmdVersion()
 	case "help", "-h", "-help", "--help":
@@ -104,21 +106,24 @@ func cmdRun(args []string) error {
 	path := fs.String("config", config.DefaultPath(), "config file")
 	logJSON := fs.Bool("log-json", false, "log as JSON")
 	controlAddr := fs.String("control", control.DefaultAddr, `local control API address ("off" to disable)`)
+	service := fs.Bool("service", false, "running as the installed systemd service (set by its unit): updates apply on restart")
 	_ = fs.Parse(args)
 
 	if underServiceManager() {
 		// Windows: the service has no console, so it logs to a file beside
 		// its config, and stops when the service manager says so.
 		return runAsService(filepath.Dir(*path), func(ctx context.Context, logOut io.Writer) error {
-			return runBridge(ctx, *path, *logJSON, *controlAddr, logOut)
+			return runBridge(ctx, *path, *logJSON, *controlAddr, logOut, true)
 		})
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runBridge(ctx, *path, *logJSON, *controlAddr, os.Stderr)
+	return runBridge(ctx, *path, *logJSON, *controlAddr, os.Stderr, *service)
 }
 
-func runBridge(ctx context.Context, path string, logJSON bool, controlAddr string, logOut io.Writer) error {
+// runBridge runs the bridge until ctx ends. managed says it's the installed
+// service, which may update itself.
+func runBridge(ctx context.Context, path string, logJSON bool, controlAddr string, logOut io.Writer, managed bool) error {
 	cfg, err := config.Load(path)
 	if err != nil {
 		return err
@@ -144,10 +149,15 @@ func runBridge(ctx context.Context, path string, logJSON bool, controlAddr strin
 		detail = fmt.Sprintf("%s:%d", cfg.Node.TCPHost, cfg.Node.TCPPort)
 	}
 	log.Info("meshbridge starting", "version", version, "gateway", cfg.Gateway, "relay", cfg.Relay, "node", detail)
+	ctx, stopForUpdate := context.WithCancel(ctx)
+	defer stopForUpdate()
+	upd := &autoUpdater{dir: dir, log: log, managed: managed && cfg.Host.AutoUpdate,
+		allowHTTP: strings.HasPrefix(cfg.Relay, "ws://"), restart: stopForUpdate}
 	b := bridge.New(bridge.Options{
 		Config: cfg, Opener: opener, Log: log, Version: version,
-		LinkKind: meshproto.LinkTCP, LinkDetail: detail, State: st, Diag: diag,
+		LinkKind: meshproto.LinkTCP, LinkDetail: detail, State: st, Diag: diag, OnUpdate: upd.offer,
 	})
+	upd.bridge = b
 	if controlAddr != "off" {
 		tok, err := control.LoadOrCreateToken(filepath.Join(dir, control.TokenFile))
 		if err != nil {
