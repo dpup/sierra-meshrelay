@@ -87,7 +87,8 @@ func TestAdminInviteNamedAtRedemption(t *testing.T) {
 	}
 	msg := admin.InviteMessage(inv)
 	words := strings.ReplaceAll(inv.Passphrase, "-", " ")
-	if !strings.Contains(msg, words) || !strings.Contains(msg, `install.sh | sh -s -- --passphrase "`+words+`"`) {
+	if !strings.Contains(msg, words) || !strings.Contains(msg, `install.sh | sh -s -- --passphrase "`+words+`"`) ||
+		!strings.Contains(msg, `install.ps1))) -Passphrase "`+words+`"`) {
 		t.Fatalf("message:\n%s", msg)
 	}
 

@@ -231,13 +231,23 @@ func InstallOneLiner(passphrase string) string {
 		strings.ReplaceAll(passphrase, "-", " ") + `"`
 }
 
+// InstallOneLinerWindows is the Windows (PowerShell) install command for a
+// passphrase.
+func InstallOneLinerWindows(passphrase string) string {
+	return `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.ps1))) -Passphrase "` +
+		strings.ReplaceAll(passphrase, "-", " ") + `"`
+}
+
 // InviteMessage is a message to send the host with everything they need.
 func InviteMessage(inv NewInvite) string {
 	words := strings.ReplaceAll(inv.Passphrase, "-", " ")
 	var b strings.Builder
 	b.WriteString("Here's how to connect your MeshCore node to SIERRA.\n\n")
 	b.WriteString("Your SIERRA passphrase is:  " + words + "\n\n")
-	b.WriteString("On a Linux computer or Raspberry Pi on the same network as your node, run:\n\n")
+	b.WriteString("Use a computer that stays on, on the same network as your node.\n\n")
+	b.WriteString("On Windows, open PowerShell as administrator (right-click PowerShell, Run as administrator) and run:\n\n")
+	b.WriteString("  " + InstallOneLinerWindows(inv.Passphrase) + "\n\n")
+	b.WriteString("On Linux or a Raspberry Pi, run:\n\n")
 	b.WriteString("  " + InstallOneLiner(inv.Passphrase) + "\n\n")
 	fmt.Fprintf(&b, "The passphrase works until %s.", inv.Invite.ExpiresAt.Local().Format("Mon 2 Jan"))
 	if inv.Invite.MaxUses > 1 {
