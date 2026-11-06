@@ -42,7 +42,6 @@ func TestRepeaterLoginStatusTelemetry(t *testing.T) {
 	if err != nil || l.Access() != "guest" {
 		t.Fatalf("guest login: %+v %v", l, err)
 	}
-	time.Sleep(1100 * time.Millisecond) // the sim's replay check needs a newer second
 	if l, err = s.Login(ctx, r.Pubkey, "adm"); err != nil || l.Access() != "admin" {
 		t.Fatalf("admin login: %+v %v", l, err)
 	}

@@ -31,8 +31,9 @@ type Node struct {
 	mu        sync.Mutex
 	contacts  []contact
 	repeaters map[string]*Repeater
-	clock     time.Duration // offset from the real clock
-	lastLogin map[string]uint32
+	clock     time.Duration     // offset from the real clock
+	lastSent  uint32            // last request timestamp (getCurrentTimeUnique)
+	lastLogin map[string]uint32 // per repeater: the newest login timestamp it accepted
 
 	// MaxContacts is the contacts table size (default 100).
 	MaxContacts int
@@ -68,6 +69,16 @@ func (n *Node) AddInRange(r *Repeater) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.repeaters[r.Pubkey] = r
+}
+
+// Update changes a repeater in range (its passwords, readings…) safely
+// while the node is serving.
+func (n *Node) Update(pubkey string, fn func(*Repeater)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if r := n.repeaters[pubkey]; r != nil {
+		fn(r)
+	}
 }
 
 // SetUnreachable makes a repeater in range stop (or start) answering.
@@ -198,9 +209,11 @@ func (n *Node) Handle(f []byte, reply func([]byte)) bool {
 		case 26:
 			n.Logins++
 			pw := string(f[33:])
-			ts := n.now()
+			// Like RTCClock::getCurrentTimeUnique: never the same twice.
+			ts := max(n.now(), n.lastSent+1)
+			n.lastSent = ts
 			switch {
-			case ts <= n.lastLogin[pk]: // replay protection: no answer
+			case ts <= n.lastLogin[pk]: // the repeater's replay protection: no answer
 				return true
 			case pw == r.AdminPassword && pw != "":
 				push = append(append([]byte{0x85, 1}, prefix...), 0, 0, 0, 0, 3, 1)
