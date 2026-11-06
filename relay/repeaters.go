@@ -253,6 +253,8 @@ func RepeaterErrorText(err error) string {
 		return "the gateway node's contacts are full"
 	case stderrors.Is(err, meshops.ErrNoReply):
 		return "the gateway's node didn't answer"
+	case stderrors.Is(err, ErrNotKnown):
+		return "no gateway in range has heard it"
 	}
 	return "check failed"
 }
@@ -269,25 +271,43 @@ type RepeaterCheck struct {
 	Gateway   string             `json:"gateway"`
 }
 
-// CheckRepeater logs in to a repeater through gateway's node and reads its
-// status and telemetry, under a lease at the given priority. If the node
-// doesn't have the repeater as a contact, it's added for the check and
-// removed after, so the host's contacts are left as they were. name is used
-// for an added contact; "" keeps the node's own.
-func (r *Relay) CheckRepeater(ctx context.Context, gateway, client string, priority int, pubkey, name, password string) (RepeaterCheck, error) {
-	res := RepeaterCheck{Gateway: gateway, Name: name}
-	err := r.Use(ctx, LeaseRequest{Gateway: gateway, Client: client, Role: RoleAgent, Priority: priority},
+// CheckRequest asks CheckRepeater to read a repeater through one gateway.
+type CheckRequest struct {
+	Gateway  string
+	Client   string // the lease's client name
+	Priority int    // PriorityNormal for a person waiting, PriorityBackground for a poller
+	Pubkey   string
+	Name     string // for a contact added for the check; "" keeps the node's own
+	Password string
+	// OnlyIfKnown skips (ErrNotKnown) a gateway whose node doesn't have the
+	// repeater as a contact, instead of adding it: a node that has heard a
+	// repeater's advert is the best sign it's in range, and the host's
+	// contacts are never touched.
+	OnlyIfKnown bool
+}
+
+// ErrNotKnown means the gateway's node doesn't have the repeater as a
+// contact (CheckRequest.OnlyIfKnown).
+var ErrNotKnown = stderrors.New("the gateway's node hasn't heard this repeater")
+
+// CheckRepeater logs in to a repeater through a gateway's node and reads its
+// status and telemetry, under a lease. If the node doesn't have the repeater
+// as a contact, it's added for the check and removed after (unless
+// OnlyIfKnown), so the host's contacts are left as they were.
+func (r *Relay) CheckRepeater(ctx context.Context, req CheckRequest) (RepeaterCheck, error) {
+	res := RepeaterCheck{Gateway: req.Gateway, Name: req.Name}
+	pubkey := req.Pubkey
+	err := r.Use(ctx, LeaseRequest{Gateway: req.Gateway, Client: req.Client, Role: RoleAgent, Priority: req.Priority},
 		func(ctx context.Context, s *meshops.Session) error {
 			if _, err := s.AppStart(ctx, "sierra-relay"); err != nil {
 				return err
 			}
-			// A node whose clock went backwards can't log in (replay
-			// protection); companion apps set the clock on connect too.
-			_, _ = s.SyncClock(ctx, 5*time.Minute)
 			c, err := s.Contact(ctx, pubkey)
 			switch {
+			case stderrors.Is(err, meshops.ErrNotFound) && req.OnlyIfKnown:
+				return ErrNotKnown
 			case stderrors.Is(err, meshops.ErrNotFound):
-				if err := s.AddContact(ctx, meshops.Contact{Pubkey: pubkey, Type: meshops.TypeRepeater, Name: name}); err != nil {
+				if err := s.AddContact(ctx, meshops.Contact{Pubkey: pubkey, Type: meshops.TypeRepeater, Name: req.Name}); err != nil {
 					return err
 				}
 				defer func() {
@@ -302,7 +322,10 @@ func (r *Relay) CheckRepeater(ctx context.Context, gateway, client string, prior
 					res.Name = c.Name
 				}
 			}
-			login, err := s.Login(ctx, pubkey, password)
+			// A node whose clock went backwards can't log in (replay
+			// protection); companion apps set the clock on connect too.
+			_, _ = s.SyncClock(ctx, 5*time.Minute)
+			login, err := s.Login(ctx, pubkey, req.Password)
 			if err != nil {
 				return err
 			}
@@ -454,7 +477,8 @@ func (r *Relay) addRepeater(ctx context.Context, body addRepeaterBody, gateway, 
 	if existing, err := r.store.Repeater(pk); err == nil && byGateway != "" && existing.AddedByGateway != byGateway {
 		return nil, conflict("this repeater is already shared with SIERRA by someone else")
 	}
-	check, err := r.CheckRepeater(ctx, gateway, "repeater-check", PriorityNormal, pk, strings.TrimSpace(body.Name), body.Password)
+	check, err := r.CheckRepeater(ctx, CheckRequest{Gateway: gateway, Client: "repeater-check", Priority: PriorityNormal,
+		Pubkey: pk, Name: strings.TrimSpace(body.Name), Password: body.Password})
 	if err != nil {
 		return nil, repeaterErr(err)
 	}

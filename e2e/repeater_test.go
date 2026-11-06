@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -172,4 +173,31 @@ func TestShareRepeaterEdgeCases(t *testing.T) {
 func jsonString(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// TestCheckRepeaterOnlyIfKnown: the poller's mode never adds a contact to a
+// host's node; a node that hasn't heard the repeater is skipped.
+func TestCheckRepeaterOnlyIfKnown(t *testing.T) {
+	lr := startRelay(t, withSecretKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rpt := &meshsim.Repeater{Pubkey: hexKey("d"), Name: "Peak", GuestPassword: "g", BatteryMV: 3700, TempC: -2.5}
+	deaf := meshsim.New() // in range, but hasn't heard its advert
+	deaf.AddInRange(rpt)
+	heard := meshsim.New(rpt)
+	for name, mesh := range map[string]*meshsim.Node{"deaf": deaf, "heard": heard} {
+		tok := lr.createGateway(name)
+		startBridge(t, lr, name, tok, startMeshNode(t, name, mesh))
+		lr.waitGateway(name, name+" online", connected)
+	}
+	req := relay.CheckRequest{Client: "telemetry", Priority: relay.PriorityBackground, Pubkey: rpt.Pubkey, Password: "g", OnlyIfKnown: true}
+	req.Gateway = "deaf"
+	if _, err := lr.relay.CheckRepeater(ctx, req); !errors.Is(err, relay.ErrNotKnown) || deaf.HasContact(rpt.Pubkey) {
+		t.Fatalf("deaf gateway: %v (contact added: %v)", err, deaf.HasContact(rpt.Pubkey))
+	}
+	req.Gateway = "heard"
+	res, err := lr.relay.CheckRepeater(ctx, req)
+	if err != nil || res.Name != "Peak" || *res.Status.BatteryMilliVolts != 3700 || res.Telemetry == nil || *res.Telemetry.TemperatureC != -2.5 {
+		t.Fatalf("heard gateway: %+v %v", res, err)
+	}
 }
