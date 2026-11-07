@@ -9,6 +9,35 @@ This repo holds all three parts:
 
 A protocol change, the relay, the bridge and their end-to-end tests land in one pull request.
 
+## Quick start: install a bridge
+
+A host needs an always-on computer on the same network as a WiFi or Ethernet MeshCore companion node, and a passphrase from a SIERRA admin (see [Inviting a host](#inviting-a-host-sierra-admins)).
+
+**Linux** (x86-64, arm64 or Raspberry Pi):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.sh | sh -s -- --passphrase "maple river quartz otter"
+```
+
+**Windows 10 or 11**, from an elevated PowerShell (right-click PowerShell, **Run as administrator**), or over SSH as an administrator:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.ps1))) -Passphrase "maple river quartz otter"
+```
+
+The installer:
+1. Downloads the latest release for the machine's CPU and checks it against the release's `SHA256SUMS`.
+2. Installs the binary.
+3. Runs `meshbridge setup`, which:
+   - scans the LAN for a node on port 5000 and runs the identity check;
+   - asks which node is yours if it finds more than one;
+   - redeems the passphrase.
+4. Installs and starts the service. It starts at boot, restarts after a crash, and updates itself.
+
+Without `--passphrase` (`-Passphrase` on Windows), setup asks for one. Press Enter instead to get a pairing code to send to an admin. If the node is on another subnet, pass `--host 192.168.1.50` (`-NodeHost` on Windows). Running the installer again upgrades the bridge and skips pairing.
+
+Details, options and troubleshooting: [docs/linux.md](docs/linux.md), [docs/windows.md](docs/windows.md).
+
 ## How it fits together
 
 The same `meshbridge` binary runs at the host site and on a client's machine, with the relay in the middle. Arrows point the way each connection is dialed: both ends dial out to the relay.
@@ -112,35 +141,6 @@ The mitigation is redundancy, not storage. A shared repeater is a property of SI
   - shared repeaters, the admin API and public status.
 - **Not built yet:** the web approval page at `/mesh/pair`. Admins approve with `meshbridge admin`.
 - **Bridge:** runs on Linux (systemd) and Windows 10/11 (a Windows service), with TCP (WiFi or Ethernet) nodes. USB serial nodes aren't supported yet.
-
-## Installing a bridge (hosts)
-
-A host needs an always-on computer on the same network as a WiFi or Ethernet MeshCore companion node, and a passphrase from a SIERRA admin (see [Inviting a host](#inviting-a-host-sierra-admins)).
-
-**Linux** (x86-64, arm64 or Raspberry Pi):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.sh | sh -s -- --passphrase "maple river quartz otter"
-```
-
-**Windows 10 or 11**, from an elevated PowerShell (right-click PowerShell, **Run as administrator**), or over SSH as an administrator:
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dpup/sierra-meshrelay/main/scripts/install.ps1))) -Passphrase "maple river quartz otter"
-```
-
-The installer:
-1. Downloads the latest release for the machine's CPU and checks it against the release's `SHA256SUMS`.
-2. Installs the binary.
-3. Runs `meshbridge setup`, which:
-   - scans the LAN for a node on port 5000 and runs the identity check;
-   - asks which node is yours if it finds more than one;
-   - redeems the passphrase.
-4. Installs and starts the service. It starts at boot, restarts after a crash, and updates itself.
-
-Without `--passphrase` (`-Passphrase` on Windows), setup asks for one. Press Enter instead to get a pairing code to send to an admin. If the node is on another subnet, pass `--host 192.168.1.50` (`-NodeHost` on Windows). Running the installer again upgrades the bridge and skips pairing.
-
-Details, options and troubleshooting: [docs/linux.md](docs/linux.md), [docs/windows.md](docs/windows.md).
 
 ## Inviting a host (SIERRA admins)
 
