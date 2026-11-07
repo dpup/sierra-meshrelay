@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dpup/sierra-meshrelay/internal/admin"
 )
@@ -53,5 +54,25 @@ func TestPickNearby(t *testing.T) {
 	}
 	if near[0].Name != "zeta RPT" {
 		t.Error("pickNearby reordered the caller's slice")
+	}
+}
+
+func TestPollingState(t *testing.T) {
+	r := admin.Repeater{}
+	if got := pollingState(r); got != "-" {
+		t.Fatalf("no state: %q", got)
+	}
+	r.Poll = &admin.RepeaterPoll{}
+	if got := pollingState(r); got != "normal" {
+		t.Fatalf("normal: %q", got)
+	}
+	r.Poll.FailedCycles = 2
+	if got := pollingState(r); got != "retrying (2 missed)" {
+		t.Fatalf("retrying: %q", got)
+	}
+	at := time.Now()
+	r.Poll.WaitingSince = &at
+	if got, want := pollingState(r), "waiting (no gateway since "+since(at)+")"; got != want {
+		t.Fatalf("waiting: %q, want %q", got, want)
 	}
 }

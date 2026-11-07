@@ -256,6 +256,18 @@ func RepeaterErrorText(err error) string {
 	case stderrors.Is(err, ErrBusy):
 		return "the gateway's node is in use"
 	case stderrors.As(err, &ue):
+		switch ue.Code {
+		case "gateway_offline":
+			return "the gateway's bridge is offline"
+		case "node_disconnected":
+			return "the gateway's node is disconnected"
+		case "node_paused":
+			return "the gateway is paused by its host"
+		case "pubkey_mismatch", "pubkey_unverified":
+			return "the gateway's node key isn't verified"
+		case ReasonShutdown:
+			return "the relay is restarting"
+		}
 		return "the gateway is unavailable (" + ue.Code + ")"
 	case stderrors.Is(err, ErrLeaseEnded):
 		return "the gateway's node was taken over or paused mid-check"

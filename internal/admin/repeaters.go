@@ -12,25 +12,30 @@ const checkTimeout = 3 * time.Minute
 
 // Repeater is a repeater shared with SIERRA (never its password).
 type Repeater struct {
-	Pubkey         string     `json:"pubkey"`
-	Name           string     `json:"name"`
-	Access         string     `json:"access"`
-	AddedByGateway string     `json:"added_by_gateway"`
-	AddedByClient  string     `json:"added_by_client"`
-	CreatedAt      time.Time  `json:"created_at"`
-	LastAttemptAt  *time.Time `json:"last_attempt_at"`
-	LastOKAt       *time.Time `json:"last_ok_at"`
-	LastGateway    string     `json:"last_gateway"`
-	LastError      string     `json:"last_error"`
-	Poll           *struct {
-		Primary          string     `json:"primary"`
-		NextCycle        time.Time  `json:"next_cycle"`
-		FailedCycles     int        `json:"failed_cycles"`
-		HibernatingSince *time.Time `json:"hibernating_since"`
-		RefusedAt        *time.Time `json:"refused_at"`
-	} `json:"poll"`
+	Pubkey         string        `json:"pubkey"`
+	Name           string        `json:"name"`
+	Access         string        `json:"access"`
+	AddedByGateway string        `json:"added_by_gateway"`
+	AddedByClient  string        `json:"added_by_client"`
+	CreatedAt      time.Time     `json:"created_at"`
+	LastAttemptAt  *time.Time    `json:"last_attempt_at"`
+	LastOKAt       *time.Time    `json:"last_ok_at"`
+	LastGateway    string        `json:"last_gateway"`
+	LastError      string        `json:"last_error"`
+	Poll           *RepeaterPoll `json:"poll"`
 	// Links is how each gateway's checks went over the last 24 hours.
 	Links []RepeaterLink `json:"links"`
+}
+
+// RepeaterPoll is the poller's schedule for a repeater.
+type RepeaterPoll struct {
+	Primary          string     `json:"primary"`
+	NextCycle        time.Time  `json:"next_cycle"`
+	FailedCycles     int        `json:"failed_cycles"`
+	HibernatingSince *time.Time `json:"hibernating_since"`
+	RefusedAt        *time.Time `json:"refused_at"`
+	WaitingSince     *time.Time `json:"waiting_since"`
+	Waiting          string     `json:"waiting"`
 }
 
 // RepeaterLink is one gateway's checks of a repeater over the last day.

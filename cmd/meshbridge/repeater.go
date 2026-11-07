@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"golang.org/x/term"
 
@@ -279,6 +280,9 @@ func printRepeaters(rs []admin.Repeater, withOwner bool) {
 		if r.LastError != "" && (r.LastOKAt == nil || (r.LastAttemptAt != nil && r.LastAttemptAt.After(*r.LastOKAt))) {
 			problem = r.LastError
 		}
+		if r.Poll != nil && r.Poll.WaitingSince != nil && r.Poll.Waiting != "" {
+			problem = r.Poll.Waiting
+		}
 		line := fmt.Sprintf("%s\t%s…\t%s\t%s\t%s\t%s\t%s", r.Name, r.Pubkey[:12], r.Access, read, dash(r.LastGateway),
 			pollingState(r), problem)
 		if withOwner {
@@ -321,10 +325,21 @@ func pollingState(r admin.Repeater) string {
 		return "-"
 	case p.RefusedAt != nil:
 		return "stopped (password refused)"
+	case p.WaitingSince != nil:
+		return "waiting (no gateway since " + since(*p.WaitingSince) + ")"
 	case p.HibernatingSince != nil:
 		return "daily (unreachable since " + p.HibernatingSince.Local().Format("Jan 2") + ")"
 	case p.FailedCycles > 0:
 		return fmt.Sprintf("retrying (%d missed)", p.FailedCycles)
 	}
 	return "normal"
+}
+
+// since formats a time for "since …": the clock time today, else the date.
+func since(t time.Time) string {
+	t = t.Local()
+	if y, m, d := t.Date(); time.Now().Year() == y && time.Now().Month() == m && time.Now().Day() == d {
+		return t.Format("15:04")
+	}
+	return t.Format("Jan 2 15:04")
 }

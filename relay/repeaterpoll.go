@@ -109,6 +109,11 @@ type RepeaterPollState struct {
 	// RefusedAt is when the repeater last refused the password; polling
 	// stops until the share is updated.
 	RefusedAt *time.Time `json:"refused_at,omitempty"`
+	// WaitingSince is set while cycles end with no gateway able to try (its
+	// bridge offline, its node off or paused, in use): nothing is known about
+	// the repeater meanwhile. Waiting says why, per gateway.
+	WaitingSince *time.Time `json:"waiting_since,omitempty"`
+	Waiting      string     `json:"waiting,omitempty"`
 	// Reading is the poller's last successful reading, opaque to the relay,
 	// so a restarted poller reports it until the next read.
 	Reading json.RawMessage `json:"reading,omitempty"`
