@@ -1,6 +1,6 @@
 # sierra-meshrelay
 
-Remote access to MeshCore companion radios for SIERRA. A host's radio connects to the **relay** through **meshbridge**. Authorized clients, people or SIERRA's own services, reach the radio through the relay. The bridge dials out over WebSocket, so nothing connects in to the host's network.
+Remote access to MeshCore companion radios for [The SIERRA Grid](https://sierragridteam.org). A host's radio connects to the **relay** through **meshbridge**. Authorized clients, people or SIERRA's own services, reach the radio through the relay. The bridge dials out over WebSocket, so nothing connects in to the host's network.
 
 This repo holds all three parts:
 - the wire protocol (`PROTOCOL.md` and the Go types in `meshproto/`),
