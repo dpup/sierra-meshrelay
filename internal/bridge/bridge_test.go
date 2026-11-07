@@ -178,8 +178,9 @@ func TestFramesRoundTrip(t *testing.T) {
 			t.Fatalf("frame %d came back as % x", i, got)
 		}
 	}
-	st := h.bridge.Status()
-	if st.FramesToNode != 20 || st.DroppedFromNode != 0 {
+	// The echo can arrive before the bridge counts the frame it sent.
+	h.waitFor("20 frames counted", func(st bridge.Status) bool { return st.FramesToNode == 20 })
+	if st := h.bridge.Status(); st.DroppedFromNode != 0 {
 		t.Fatalf("status %+v", st)
 	}
 }
@@ -215,11 +216,16 @@ func TestRelink(t *testing.T) {
 	if err := s.Send(meshproto.Relink{Type: meshproto.TypeRelink}); err != nil {
 		t.Fatal(err)
 	}
-	expectNode(t, s, meshproto.NodeDisconnected)
-	expectNode(t, s, meshproto.NodeConnected)
+	// The relay may see only the reconnected state: a quick reopen can
+	// supersede the disconnected one before it's sent.
+	deadline := time.Now().Add(5 * time.Second)
+	for h.node.Accepted() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if got := h.node.Accepted(); got != 2 {
 		t.Fatalf("node accepted %d connections, want 2", got)
 	}
+	h.waitFor("node reconnected", func(st bridge.Status) bool { return st.Node.State == meshproto.NodeConnected })
 }
 
 func TestNodeDropRelayStays(t *testing.T) {
