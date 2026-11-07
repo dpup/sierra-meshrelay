@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -504,4 +506,25 @@ func TestTimedPauseDoesNotSurviveRestart(t *testing.T) {
 	h2 := start(t, setup{tune: func(o *bridge.Options) { o.State = statefile.New(state) }})
 	s2 := h2.session()
 	expectNode(t, s2, meshproto.NodeConnected)
+}
+
+// A node outage is logged once, not on every retry: retries alternate
+// reasons (a timeout, then "no node found"), and logging each filled the
+// log within hours.
+type flakyOpener struct{ n atomic.Int64 }
+
+func (o *flakyOpener) Open(context.Context) (nodelink.Link, error) {
+	if o.n.Add(1)%2 == 0 {
+		return nil, nodelink.ErrNodeNotFound
+	}
+	return nil, &net.OpError{Op: "dial", Err: os.ErrDeadlineExceeded}
+}
+
+func TestNodeOutageIsLoggedOnce(t *testing.T) {
+	h := start(t, setup{noNode: true, tune: func(o *bridge.Options) { o.Opener = &flakyOpener{} }})
+	time.Sleep(400 * time.Millisecond) // many retries at 10-50ms
+	logs := h.logs.String()
+	if n := strings.Count(logs, "node unavailable"); n != 1 {
+		t.Fatalf("logged the outage %d times, want once:\n%s", n, logs)
+	}
 }

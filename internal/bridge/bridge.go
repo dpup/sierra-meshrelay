@@ -103,6 +103,10 @@ type Bridge struct {
 	relink chan struct{}
 	pause  pauseState // guarded by mu
 
+	// The current node outage, for its log lines (runNode's goroutine only).
+	downSince, downLogged time.Time
+	downTries             int
+
 	relayClass  Class        // how the last relay session ended (guarded by mu)
 	lastTraffic atomic.Int64 // unix nanos of the last frame forwarded either way
 

@@ -53,6 +53,7 @@ type Discover struct {
 
 	mu       sync.Mutex
 	lastScan time.Time
+	misses   int // scans in a row that didn't find the node
 }
 
 func (d *Discover) defaults() {
@@ -102,6 +103,7 @@ func (d *Discover) Open(ctx context.Context) (Link, error) {
 		link, err := dialStream(ctx, addr, d.DialTimeout)
 		if err == nil {
 			d.remember(addr)
+			d.misses = 0
 			return link, nil
 		}
 		lastErr = err
@@ -114,14 +116,22 @@ func (d *Discover) Open(ctx context.Context) (Link, error) {
 		return nil, lastErr
 	}
 	d.lastScan = time.Now()
-	d.Log.Info("looking for the node on the local network", "port", d.Port)
+	// The first scan of an outage is logged; the rest (one a minute while
+	// the node is off) are debug, and the bridge summarizes the outage.
+	lvl, warn := slog.LevelDebug, slog.LevelDebug
+	if d.misses == 0 {
+		lvl, warn = slog.LevelInfo, slog.LevelWarn
+	}
+	d.Log.Log(ctx, lvl, "looking for the node on the local network", "port", d.Port)
 	found := d.scan(ctx)
 	pick, err := choose(found, d.ExpectedPubkey)
 	if err != nil {
-		d.Log.Warn("node not found on the local network", "candidates", len(found), "error", err)
+		d.misses++
+		d.Log.Log(ctx, warn, "node not found on the local network", "candidates", len(found), "error", err)
 		return nil, err
 	}
-	d.Log.Info("found the node", "addr", pick.Addr, "name", pick.Name, "pubkey", pick.Pubkey)
+	d.Log.Info("found the node", "addr", pick.Addr, "name", pick.Name, "pubkey", pick.Pubkey, "scans", d.misses+1)
+	d.misses = 0
 	link, err := dialStream(ctx, pick.Addr, d.DialTimeout)
 	if err != nil {
 		return nil, err

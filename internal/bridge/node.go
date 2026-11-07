@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net"
 	"sync/atomic"
 	"time"
@@ -143,8 +142,11 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 		b.setNode(node, nil)
 		return linkMismatch
 	}
-	b.log.Info("node connected", "link", link.Kind(), "detail", link.Detail(),
-		"name", id.Name, "pubkey", id.Pubkey, "fw", id.FW, "model", id.Model)
+	kv := []any{"link", link.Kind(), "detail", link.Detail(), "name", id.Name, "pubkey", id.Pubkey, "fw", id.FW, "model", id.Model}
+	if d := b.nodeUp(); d > 0 {
+		kv = append(kv, "unavailable_for", d.String())
+	}
+	b.log.Info("node connected", kv...)
 	b.setNode(node, link)
 
 	for f := range frames {
@@ -165,17 +167,37 @@ func (b *Bridge) serveLink(ctx context.Context, link nodelink.Link) linkResult {
 	return linkServed
 }
 
+// nodeDownSummaryEvery is how often a node outage is logged after its start.
+const nodeDownSummaryEvery = 15 * time.Minute
+
+// nodeDown records a failed try at the node. An outage is logged when it
+// starts, then summarized every nodeDownSummaryEvery: retries come every few
+// seconds to a minute, and logging each one filled the log (and the relay's
+// copy of it) within hours.
 func (b *Bridge) nodeDown(reason string, err error) {
 	n := meshproto.Node{State: meshproto.NodeDisconnected, Error: reason}
-	prev, _, _, _ := b.nodeSnapshot()
-	if prev.State != n.State || prev.Error != n.Error {
-		lvl := slog.LevelWarn
-		if prev.State == meshproto.NodeDisconnected {
-			lvl = slog.LevelInfo
-		}
-		b.log.Log(context.Background(), lvl, "node unavailable", "reason", reason, "error", err)
+	now := time.Now()
+	if b.downSince.IsZero() {
+		b.downSince, b.downLogged, b.downTries = now, now, 0
+		b.log.Warn("node unavailable", "reason", reason, "error", err)
+	} else if now.Sub(b.downLogged) >= nodeDownSummaryEvery {
+		b.downLogged = now
+		b.log.Info("node still unavailable", "reason", reason, "error", err,
+			"for", now.Sub(b.downSince).Round(time.Second).String(), "tries", b.downTries+1)
 	}
+	b.downTries++
 	b.setNode(n, nil)
+}
+
+// nodeUp ends an outage; it returns how long the node was unavailable (0 if
+// it wasn't).
+func (b *Bridge) nodeUp() time.Duration {
+	if b.downSince.IsZero() {
+		return 0
+	}
+	d := time.Since(b.downSince).Round(time.Second)
+	b.downSince, b.downTries = time.Time{}, 0
+	return d
 }
 
 // nodeErrorText turns a link error into a short reason for node_status.
