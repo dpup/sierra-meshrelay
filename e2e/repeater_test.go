@@ -274,7 +274,8 @@ func TestRepeaterAttemptsAndPollState(t *testing.T) {
 		t.Fatalf("unreachable: %v", err)
 	}
 	next := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
-	lr.relay.SetRepeaterPollState(rpt.Pubkey, relay.RepeaterPollState{Primary: "knob-gw", NextCycle: next, FailedCycles: 1})
+	lr.relay.SetRepeaterPollState(rpt.Pubkey, relay.RepeaterPollState{Primary: "knob-gw", NextCycle: next, FailedCycles: 1,
+		Reading: json.RawMessage(`{"uptime_s":7}`)})
 
 	// Writes are queued: wait for them.
 	var rep admin.Repeater
@@ -300,7 +301,7 @@ func TestRepeaterAttemptsAndPollState(t *testing.T) {
 		t.Fatalf("poll state: %+v", rep.Poll)
 	}
 	creds, err := lr.relay.RepeaterCredentials()
-	if err != nil || len(creds) != 1 || creds[0].Poll.Primary != "knob-gw" {
+	if err != nil || len(creds) != 1 || creds[0].Poll.Primary != "knob-gw" || string(creds[0].Poll.Reading) != `{"uptime_s":7}` {
 		t.Fatalf("credentials: %+v %v", creds, err)
 	}
 

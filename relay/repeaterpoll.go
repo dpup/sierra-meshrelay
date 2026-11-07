@@ -109,6 +109,9 @@ type RepeaterPollState struct {
 	// RefusedAt is when the repeater last refused the password; polling
 	// stops until the share is updated.
 	RefusedAt *time.Time `json:"refused_at,omitempty"`
+	// Reading is the poller's last successful reading, opaque to the relay,
+	// so a restarted poller reports it until the next read.
+	Reading json.RawMessage `json:"reading,omitempty"`
 }
 
 // RecordRepeaterAttempt appends one attempt and prunes old ones.

@@ -625,6 +625,7 @@ func (r *Relay) withPolling(recs []*RepeaterRecord) {
 	since := r.now().Add(-24 * time.Hour)
 	for _, rec := range recs {
 		if st, err := r.store.RepeaterPollState(rec.Pubkey); err == nil && !st.NextCycle.IsZero() {
+			st.Reading = nil // the poller's; the lists show the schedule
 			rec.Poll = &st
 		}
 		if links, err := r.store.RepeaterLinks(rec.Pubkey, since); err == nil && len(links) > 0 {
