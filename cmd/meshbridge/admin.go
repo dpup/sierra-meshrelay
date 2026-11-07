@@ -213,7 +213,7 @@ func cmdAdmin(args []string) error {
 			}
 		}
 		fmt.Printf("Removing %s revokes its token and disconnects its bridge now. Its connect history and logs are deleted.\n", name)
-		fmt.Println("To pair the host again, send it a new invite; it must move its old meshbridge.toml aside first.")
+		fmt.Println("To pair the host again, send it a new invite; it stops the service and runs: meshbridge setup -repair")
 		if len(shared) > 0 {
 			fmt.Printf("It shared %s. They stay shared; only an admin can remove them after this.\n", strings.Join(shared, ", "))
 		}
