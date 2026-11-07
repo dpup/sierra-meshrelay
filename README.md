@@ -11,16 +11,32 @@ A protocol change, the relay, the bridge and their end-to-end tests land in one 
 
 ## How it fits together
 
-The same `meshbridge` binary runs at both ends, with the relay in the middle:
+The same `meshbridge` binary runs at the host site and on a client's machine, with the relay in the middle. Arrows point the way each connection is dialed: both ends dial out to the relay.
 
-```
- host site (e.g. a cabin)              cloud                         your laptop
- ┌──────────────────────────┐                                   ┌────────────────────────────┐
- │ node ◄─TCP:5000─────┐    │                                   │   ┌─► meshbridge connect     │
- │                     │    │       data.sierragridteam.org     │   │   (127.0.0.1:5000)       │
- │   meshbridge run ───┘    │ ══WSS out══►  relay  ◄══WSS out══ │   │        ▲                 │
- │   (smb_ bridge token)    │                                   │   │   meshcore-cli -t 127…   │
- └──────────────────────────┘                                   └────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph host["Host site"]
+        node["MeshCore node<br/>(companion)"]
+        run["meshbridge run<br/>smb_ bridge token"]
+        run -- "TCP :5000" --> node
+    end
+
+    subgraph cloud["data.sierragridteam.org (sierra-data)"]
+        relay["Relay<br/>auth · pinning · leases"]
+        poller["Grid telemetry poller"]
+        grid[("The Grid")]
+        poller -- "lease (in-process)" --> relay
+        poller -- "mesh.repeater report" --> grid
+    end
+
+    subgraph laptop["Client machine"]
+        app["meshcore-cli or<br/>another companion app"]
+        connect["meshbridge connect<br/>smc_ client token<br/>127.0.0.1:5000"]
+        app -- "TCP" --> connect
+    end
+
+    run -- "WSS, outbound" --> relay
+    connect -- "WSS, outbound" --> relay
 ```
 
 - **`meshbridge run`** runs at the host site, on an always-on computer on the same network as the node. It holds the node's single companion connection and dials out to the relay with the gateway's bridge token (`smb_…`).
